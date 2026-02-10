@@ -15,13 +15,34 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Step 1: Select runner (lightweight, runs on ubuntu)
+  select-runner:
+    name: Select runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.runner.outputs.use-runner }}
+    steps:
+      # Automatically detect if a self-hosted mac-runner is online.
+      # If yes → build on local Mac (faster, free). If no → fall back to cloud.
+      # Requires a fine-grained PAT with Administration:Read permission.
+      # https://github.com/mikehardy/runner-fallback-action
+      - name: Select runner
+        id: runner
+        uses: mikehardy/runner-fallback-action@v1
+        with:
+          primary-runner: mac-runner
+          fallback-runner: macos-latest
+          fallback-on-error: true
+          github-token: ${{ secrets.RUNNER_TOKEN }}
+
+  # Step 2: Check if a release is needed (runs on mac-runner or fallback)
   check-release:
     name: Check for release
-    runs-on: ubuntu-latest
+    needs: select-runner
+    runs-on: ${{ fromJson(needs.select-runner.outputs.runner) }}
     outputs:
       new_release: ${{ steps.semantic.outputs.new_release_published }}
       version: ${{ steps.semantic.outputs.new_release_version }}
-      runner: ${{ steps.runner.outputs.use-runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,30 +61,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Automatically detect if a self-hosted mac-runner is online.
-      # If yes → build on local Mac (faster, free). If no → fall back to cloud.
-      # Requires a fine-grained PAT with Administration:Read permission.
-      # https://github.com/mikehardy/runner-fallback-action
-      - name: Select runner
-        id: runner
-        uses: mikehardy/runner-fallback-action@v1
-        with:
-          primary-runner: mac-runner
-          fallback-runner: macos-latest
-          fallback-on-error: true
-          github-token: ${{ secrets.RUNNER_TOKEN }}
-
-      - name: Release check result
+      - name: Result
         run: |
           echo "New release: ${{ steps.semantic.outputs.new_release_published }}"
           echo "Version: ${{ steps.semantic.outputs.new_release_version }}"
-          echo "Runner: ${{ steps.runner.outputs.use-runner }}"
 
+  # Step 3: Build and release (runs on same runner as step 2)
   build-and-release:
     name: Build & Release
-    needs: check-release
+    needs: [select-runner, check-release]
     if: needs.check-release.outputs.new_release == 'true'
-    runs-on: ${{ fromJson(needs.check-release.outputs.runner) }}
+    runs-on: ${{ fromJson(needs.select-runner.outputs.runner) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
