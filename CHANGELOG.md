@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/omniaura/mac-runner/compare/v1.1.4...v1.2.0) (2026-02-10)
+
+
+### Features
+
+* symlink mac-runner CLI to PATH via Homebrew cask ([4cae272](https://github.com/omniaura/mac-runner/commit/4cae27258b55c601a8b75ef8693f2c3e0f5bfee9))
+
 ## [1.1.4](https://github.com/omniaura/mac-runner/compare/v1.1.3...v1.1.4) (2026-02-10)
 
 
