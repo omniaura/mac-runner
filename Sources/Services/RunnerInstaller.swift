@@ -46,7 +46,8 @@ class RunnerInstaller {
         repo: String,
         registrationToken: String,
         name: String,
-        labels: [String]
+        labels: [String],
+        isolation: IsolationMode = .none
     ) async throws {
         // Build config command
         var args = [
@@ -63,13 +64,25 @@ class RunnerInstaller {
             args.append(labels.joined(separator: ","))
         }
 
-        // Run config script — quote the directory to handle spaces in path (e.g. "Application Support")
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
         let escapedDir = directory.replacingOccurrences(of: "'", with: "'\\''")
-        process.arguments = ["-c", "cd '\(escapedDir)' && \(args.joined(separator: " "))"]
+        let configCommand = "cd '\(escapedDir)' && \(args.joined(separator: " "))"
 
+        let process: Process
         let pipe = Pipe()
+
+        switch isolation {
+        case .none:
+            process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = ["-c", configCommand]
+
+        case .dedicatedUser(let username):
+            // Run config.sh as the service user
+            process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+            process.arguments = ["-n", "-u", username, "/bin/bash", "-l", "-c", configCommand]
+        }
+
         process.standardOutput = pipe
         process.standardError = pipe
 
@@ -91,12 +104,18 @@ class RunnerInstaller {
         registrationToken: String,
         name: String,
         labels: [String],
-        runnerId: UUID
+        runnerId: UUID,
+        isolation: IsolationMode = .none
     ) async throws -> String {
-        let directory = try RunnerDirectory.path(for: runnerId)
+        let directory = try RunnerDirectory.path(for: runnerId, isolation: isolation)
 
         // Install runner binary
         try await installRunner(to: directory)
+
+        // When isolated, chown the extracted runner to the service user
+        if case .dedicatedUser(let username) = isolation {
+            try RunnerDirectory.createDirectoryWithSudo(at: directory, owner: username)
+        }
 
         // Configure with GitHub
         try await configureRunner(
@@ -104,7 +123,8 @@ class RunnerInstaller {
             repo: repo,
             registrationToken: registrationToken,
             name: name,
-            labels: labels
+            labels: labels,
+            isolation: isolation
         )
 
         return directory

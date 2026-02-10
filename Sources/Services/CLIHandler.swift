@@ -31,6 +31,8 @@ enum CLIHandler {
             await handleStop(args: Array(args.dropFirst()))
         case "status":
             await handleStatus()
+        case "setup":
+            await handleSetup(args: Array(args.dropFirst()))
         default:
             print("Unknown command: \(command)")
             printUsage()
@@ -57,12 +59,16 @@ enum CLIHandler {
           start <name>      Start a runner
           stop <name>       Stop a runner
           status            Show runner status summary
+          setup             Set up dedicated user isolation
           help              Show this help message
           version           Show version
 
         ADD OPTIONS:
           --name <name>     Runner name (default: auto-generated)
           --labels <l1,l2>  Comma-separated labels (default: macos)
+
+        SETUP OPTIONS:
+          --teardown        Remove isolation (delete user, sudoers, reset config)
 
         EXAMPLES:
           mac-runner auth
@@ -71,6 +77,8 @@ enum CLIHandler {
           mac-runner start my-runner
           mac-runner stop my-runner
           mac-runner remove my-runner
+          mac-runner setup
+          mac-runner setup --teardown
         """)
     }
 
@@ -236,5 +244,21 @@ enum CLIHandler {
 
         let authenticated = await GHCLIService.shared.checkAuth()
         print("  GitHub auth: \(authenticated ? "authenticated" : "not authenticated")")
+
+        switch manager.currentSettings.isolationMode {
+        case .none:
+            print("  Isolation: disabled")
+        case .dedicatedUser(let username):
+            print("  Isolation: enabled (user: \(username))")
+        }
+    }
+
+    @MainActor
+    private static func handleSetup(args: [String]) async {
+        if args.contains("--teardown") {
+            await SetupWizard.runTeardown()
+        } else {
+            await SetupWizard.runSetup()
+        }
     }
 }

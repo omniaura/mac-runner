@@ -40,18 +40,52 @@ class ConfigService {
 class RunnerDirectory {
     /// Use ~/.mac-runner/runners/ instead of Application Support to avoid
     /// spaces in paths, which break GitHub Actions runner script execution.
-    static func path(for runnerId: UUID) throws -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let runnerDir = home
+    /// When isolation is `.dedicatedUser`, resolve under /Users/{username}/.mac-runner/runners/.
+    static func path(for runnerId: UUID, isolation: IsolationMode = .none) throws -> String {
+        let baseDir: URL
+        switch isolation {
+        case .none:
+            baseDir = FileManager.default.homeDirectoryForCurrentUser
+        case .dedicatedUser(let username):
+            baseDir = URL(fileURLWithPath: "/Users/\(username)")
+        }
+
+        let runnerDir = baseDir
             .appendingPathComponent(".mac-runner", isDirectory: true)
             .appendingPathComponent("runners", isDirectory: true)
             .appendingPathComponent(runnerId.uuidString, isDirectory: true)
 
-        try FileManager.default.createDirectory(
-            at: runnerDir,
-            withIntermediateDirectories: true
-        )
+        switch isolation {
+        case .none:
+            try FileManager.default.createDirectory(
+                at: runnerDir,
+                withIntermediateDirectories: true
+            )
+        case .dedicatedUser(let username):
+            try Self.createDirectoryWithSudo(at: runnerDir.path, owner: username)
+        }
 
         return runnerDir.path
+    }
+
+    /// Create a directory owned by the service user via sudo.
+    static func createDirectoryWithSudo(at path: String, owner: String) throws {
+        // mkdir -p
+        let mkdir = Process()
+        mkdir.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+        mkdir.arguments = ["-n", "mkdir", "-p", path]
+        mkdir.standardOutput = FileHandle.nullDevice
+        mkdir.standardError = FileHandle.nullDevice
+        try mkdir.run()
+        mkdir.waitUntilExit()
+
+        // chown -R
+        let chown = Process()
+        chown.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+        chown.arguments = ["-n", "chown", "-R", "\(owner):staff", path]
+        chown.standardOutput = FileHandle.nullDevice
+        chown.standardError = FileHandle.nullDevice
+        try chown.run()
+        chown.waitUntilExit()
     }
 }

@@ -9,7 +9,9 @@ class RunnerManager: ObservableObject {
 
     private let configService = ConfigService()
     private let ghService = GHCLIService.shared
+    private let isolationService = UserIsolationService.shared
     private var runnerProcesses: [UUID: Process] = [:]
+    private(set) var currentSettings: AppSettings = .default
 
     init() {
         loadConfiguration()
@@ -22,6 +24,7 @@ class RunnerManager: ObservableObject {
         do {
             let config = try configService.loadConfig()
             runners = config.runners
+            currentSettings = config.settings
         } catch {
             self.error = "Failed to load config: \(error.localizedDescription)"
         }
@@ -29,11 +32,16 @@ class RunnerManager: ObservableObject {
 
     func saveConfiguration() {
         do {
-            let config = RunnerConfig(runners: runners, settings: .default)
+            let config = RunnerConfig(runners: runners, settings: currentSettings)
             try configService.saveConfig(config)
         } catch {
             self.error = "Failed to save config: \(error.localizedDescription)"
         }
+    }
+
+    func updateSettings(_ settings: AppSettings) {
+        currentSettings = settings
+        saveConfiguration()
     }
 
     // MARK: - Runner Management
@@ -65,7 +73,8 @@ class RunnerManager: ObservableObject {
             registrationToken: registrationToken,
             name: name,
             labels: labels,
-            runnerId: runner.id
+            runnerId: runner.id,
+            isolation: currentSettings.isolationMode
         )
 
         // Look up the GitHub-assigned runner ID so we can delete it later
@@ -97,9 +106,8 @@ class RunnerManager: ObservableObject {
         }
 
         // Clean up PID file
-        if let dir = try? RunnerDirectory.path(for: id) {
-            try? FileManager.default.removeItem(atPath: "\(dir)/runner.pid")
-        }
+        let pidFile = pidFilePath(for: id)
+        try? FileManager.default.removeItem(atPath: pidFile)
 
         // Remove from list
         runners.removeAll(where: { $0.id == id })
@@ -117,9 +125,10 @@ class RunnerManager: ObservableObject {
         }
 
         let runner = runners[index]
+        let isolation = currentSettings.isolationMode
 
         // Get runner directory
-        let runnerDir = try RunnerDirectory.path(for: id)
+        let runnerDir = try RunnerDirectory.path(for: id, isolation: isolation)
 
         // Ensure runner binary is downloaded and configured
         if !FileManager.default.fileExists(atPath: "\(runnerDir)/run.sh") {
@@ -129,33 +138,56 @@ class RunnerManager: ObservableObject {
                 registrationToken: registrationToken,
                 name: runner.name,
                 labels: runner.labels,
-                runnerId: id
+                runnerId: id,
+                isolation: isolation
             )
         }
 
         // Launch runner as a background process that survives the parent (CLI) exiting.
-        // We redirect stdout/stderr to a log file (not a pipe) so there's no parent
-        // dependency, and the child gets reparented to launchd when the parent exits.
         let logFile = "\(runnerDir)/runner.log"
-        let pidFile = "\(runnerDir)/runner.pid"
+        let pidFile = pidFilePath(for: id)
 
-        FileManager.default.createFile(atPath: logFile, contents: nil)
-        guard let logHandle = FileHandle(forWritingAtPath: logFile) else {
-            throw RunnerError.startFailed
+        switch isolation {
+        case .none:
+            FileManager.default.createFile(atPath: logFile, contents: nil)
+            guard let logHandle = FileHandle(forWritingAtPath: logFile) else {
+                throw RunnerError.startFailed
+            }
+            logHandle.seekToEndOfFile()
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "\(runnerDir)/run.sh")
+            process.currentDirectoryURL = URL(fileURLWithPath: runnerDir)
+            process.standardOutput = logHandle
+            process.standardError = logHandle
+
+            try process.run()
+            let pid = process.processIdentifier
+            try String(pid).write(toFile: pidFile, atomically: true, encoding: .utf8)
+
+        case .dedicatedUser(let username):
+            // Create log file as service user
+            try RunnerDirectory.createDirectoryWithSudo(
+                at: URL(fileURLWithPath: logFile).deletingLastPathComponent().path,
+                owner: username
+            )
+
+            let process = try isolationService.launchAsUser(
+                username: username,
+                executable: "\(runnerDir)/run.sh",
+                currentDirectory: runnerDir,
+                standardOutput: FileHandle.nullDevice,
+                standardError: FileHandle.nullDevice
+            )
+            let pid = process.processIdentifier
+            // PID file stays in main user's space
+            let pidDir = URL(fileURLWithPath: pidFile).deletingLastPathComponent().path
+            try FileManager.default.createDirectory(
+                atPath: pidDir,
+                withIntermediateDirectories: true
+            )
+            try String(pid).write(toFile: pidFile, atomically: true, encoding: .utf8)
         }
-        logHandle.seekToEndOfFile()
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "\(runnerDir)/run.sh")
-        process.currentDirectoryURL = URL(fileURLWithPath: runnerDir)
-        process.standardOutput = logHandle
-        process.standardError = logHandle
-
-        try process.run()
-        let pid = process.processIdentifier
-
-        // Write PID file so other CLI invocations can find and stop this runner
-        try String(pid).write(toFile: pidFile, atomically: true, encoding: .utf8)
 
         runners[index].status = .running
         saveConfiguration()
@@ -166,23 +198,27 @@ class RunnerManager: ObservableObject {
             throw RunnerError.notFound
         }
 
+        let isolation = currentSettings.isolationMode
+
         // Try in-memory process first (GUI path)
         if let process = runnerProcesses[id] {
             process.terminate()
             process.waitUntilExit()
             runnerProcesses.removeValue(forKey: id)
         } else if let pid = readPID(for: id) {
-            // Kill the entire process group so child processes (Runner.Listener) also die.
-            // The run.sh script and its children share a process group.
-            killProcessTree(pid)
+            switch isolation {
+            case .none:
+                killProcessTree(pid)
+            case .dedicatedUser(let username):
+                isolationService.killProcessTree(pid: pid, username: username)
+            }
         } else {
             throw RunnerError.notRunning
         }
 
         // Clean up PID file
-        if let dir = try? RunnerDirectory.path(for: id) {
-            try? FileManager.default.removeItem(atPath: "\(dir)/runner.pid")
-        }
+        let pidFile = pidFilePath(for: id)
+        try? FileManager.default.removeItem(atPath: pidFile)
 
         runners[index].status = .stopped
         saveConfiguration()
@@ -212,9 +248,23 @@ class RunnerManager: ObservableObject {
 
     // MARK: - PID Management
 
+    /// PID files are always stored in the main user's Application Support directory
+    /// to avoid cross-user permission issues when isolation is enabled.
+    private func pidFilePath(for id: UUID) -> String {
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first!
+        let pidsDir = appSupport
+            .appendingPathComponent("MacRunner", isDirectory: true)
+            .appendingPathComponent("pids", isDirectory: true)
+        try? FileManager.default.createDirectory(at: pidsDir, withIntermediateDirectories: true)
+        return pidsDir.appendingPathComponent("\(id.uuidString).pid").path
+    }
+
     private func readPID(for id: UUID) -> pid_t? {
-        guard let dir = try? RunnerDirectory.path(for: id),
-              let contents = try? String(contentsOfFile: "\(dir)/runner.pid", encoding: .utf8),
+        let pidFile = pidFilePath(for: id)
+        guard let contents = try? String(contentsOfFile: pidFile, encoding: .utf8),
               let pid = Int32(contents.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             return nil
         }
@@ -260,10 +310,8 @@ class RunnerManager: ObservableObject {
         for i in runners.indices {
             if runners[i].status == .running && !isRunnerProcessAlive(runners[i].id) {
                 runners[i].status = .stopped
-                // Clean up stale PID file
-                if let dir = try? RunnerDirectory.path(for: runners[i].id) {
-                    try? FileManager.default.removeItem(atPath: "\(dir)/runner.pid")
-                }
+                let pidFile = pidFilePath(for: runners[i].id)
+                try? FileManager.default.removeItem(atPath: pidFile)
                 changed = true
             }
         }
@@ -275,9 +323,8 @@ class RunnerManager: ObservableObject {
     private func handleRunnerTermination(_ id: UUID) {
         runnerProcesses.removeValue(forKey: id)
 
-        if let dir = try? RunnerDirectory.path(for: id) {
-            try? FileManager.default.removeItem(atPath: "\(dir)/runner.pid")
-        }
+        let pidFile = pidFilePath(for: id)
+        try? FileManager.default.removeItem(atPath: pidFile)
 
         if let index = runners.firstIndex(where: { $0.id == id }) {
             runners[index].status = .stopped
