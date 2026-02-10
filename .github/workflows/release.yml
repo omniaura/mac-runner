@@ -1,0 +1,149 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  check-release:
+    name: Check for release
+    runs-on: ubuntu-latest
+    outputs:
+      new_release: ${{ steps.semantic.outputs.new_release_published }}
+      version: ${{ steps.semantic.outputs.new_release_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if release is needed
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          dry_run: true
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/git
+            conventional-changelog-conventionalcommits
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release check result
+        run: |
+          echo "New release: ${{ steps.semantic.outputs.new_release_published }}"
+          echo "Version: ${{ steps.semantic.outputs.new_release_version }}"
+
+  build-and-release:
+    name: Build & Release
+    needs: check-release
+    if: needs.check-release.outputs.new_release == 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Resolve dependencies
+        run: swift package resolve
+
+      - name: Build universal binary
+        run: |
+          echo "Building for arm64..."
+          swift build -c release --arch arm64
+
+          echo "Building for x86_64..."
+          swift build -c release --arch x86_64
+
+          echo "Creating universal binary..."
+          mkdir -p .build/universal
+          lipo -create \
+            .build/arm64-apple-macosx/release/MacRunner \
+            .build/x86_64-apple-macosx/release/MacRunner \
+            -output .build/universal/MacRunner
+
+      - name: Create app bundle
+        env:
+          VERSION: ${{ needs.check-release.outputs.version }}
+        run: |
+          mkdir -p build/MacRunner.app/Contents/MacOS
+          mkdir -p build/MacRunner.app/Contents/Resources
+          cp .build/universal/MacRunner build/MacRunner.app/Contents/MacOS/
+          chmod +x build/MacRunner.app/Contents/MacOS/MacRunner
+          ./scripts/generate-info-plist.sh > build/MacRunner.app/Contents/Info.plist
+
+      - name: Create ZIP
+        id: zip
+        env:
+          VERSION: ${{ needs.check-release.outputs.version }}
+        run: |
+          cd build
+          zip -r "MacRunner-${VERSION}.zip" MacRunner.app
+          echo "sha256=$(shasum -a 256 "MacRunner-${VERSION}.zip" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Create DMG
+        env:
+          VERSION: ${{ needs.check-release.outputs.version }}
+        run: |
+          brew install create-dmg || true
+          create-dmg \
+            --volname "Mac Runner" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "MacRunner.app" 175 120 \
+            --hide-extension "MacRunner.app" \
+            --app-drop-link 425 120 \
+            "build/MacRunner-${VERSION}.dmg" \
+            "build/MacRunner.app" || \
+          hdiutil create \
+            -volname "Mac Runner" \
+            -srcfolder build/MacRunner.app \
+            -ov -format UDZO \
+            "build/MacRunner-${VERSION}.dmg"
+
+      - name: Update Homebrew cask
+        env:
+          VERSION: ${{ needs.check-release.outputs.version }}
+          SHA256: ${{ steps.zip.outputs.sha256 }}
+        run: |
+          sed -i '' 's/version ".*"/version "'"${VERSION}"'"/' Casks/mac-runner.rb
+          sed -i '' 's/sha256 .*/sha256 "'"${SHA256}"'"/' Casks/mac-runner.rb
+          echo "Updated cask to version ${VERSION} with SHA256 ${SHA256}"
+          cat Casks/mac-runner.rb
+
+      - name: Run semantic-release
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/git
+            conventional-changelog-conventionalcommits
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.check-release.outputs.version }}
+        run: |
+          gh release upload "v${VERSION}" \
+            "build/MacRunner-${VERSION}.zip" \
+            "build/MacRunner-${VERSION}.dmg" \
+            --clobber
