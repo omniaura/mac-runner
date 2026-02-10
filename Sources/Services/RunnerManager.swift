@@ -56,6 +56,15 @@ class RunnerManager: ObservableObject {
         // Store token securely
         try TokenStorage.shared.saveToken(token, for: runner.id)
 
+        // Download, configure, and install runner automatically!
+        try await RunnerInstaller.shared.setupRunner(
+            repo: repo,
+            token: token,
+            name: name,
+            labels: labels,
+            runnerId: runner.id
+        )
+
         // Add to list
         runners.append(runner)
         saveConfiguration()
@@ -103,10 +112,15 @@ class RunnerManager: ObservableObject {
         // Get runner directory
         let runnerDir = try RunnerDirectory.path(for: id)
 
-        // Ensure runner binary is downloaded
+        // Ensure runner binary is downloaded and configured
         if !FileManager.default.fileExists(atPath: "\(runnerDir)/run.sh") {
-            try await downloadRunner(to: runnerDir)
-            try await configureRunner(at: runnerDir, repo: runner.repo, token: token, labels: runner.labels)
+            try await RunnerInstaller.shared.setupRunner(
+                repo: runner.repo,
+                token: token,
+                name: runner.name,
+                labels: runner.labels,
+                runnerId: id
+            )
         }
 
         // Start runner process
@@ -175,19 +189,6 @@ class RunnerManager: ObservableObject {
             saveConfiguration()
         }
     }
-
-    private func downloadRunner(to directory: String) async throws {
-        // Download GitHub Actions runner binary
-        // Implementation: curl GitHub releases, extract tar.gz
-        // For MVP, assume runner binary is pre-downloaded
-        throw RunnerError.notImplemented
-    }
-
-    private func configureRunner(at directory: String, repo: String, token: String, labels: [String]) async throws {
-        // Run ./config.sh with registration token
-        // Implementation: get registration token from GitHub, run config.sh
-        throw RunnerError.notImplemented
-    }
 }
 
 // MARK: - Errors
@@ -197,7 +198,6 @@ enum RunnerError: LocalizedError {
     case alreadyRunning
     case notRunning
     case tokenNotFound
-    case notImplemented
 
     var errorDescription: String? {
         switch self {
@@ -205,7 +205,6 @@ enum RunnerError: LocalizedError {
         case .alreadyRunning: return "Runner is already running"
         case .notRunning: return "Runner is not running"
         case .tokenNotFound: return "GitHub token not found"
-        case .notImplemented: return "Feature not yet implemented"
         }
     }
 }

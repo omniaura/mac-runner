@@ -9,6 +9,7 @@ Simple Mac menu bar app for managing GitHub Actions self-hosted runners.
 - 🎯 Perfect for when you need your Mac's resources for intensive work
 - 📊 Monitor runner status from menu bar
 - ⚡ Native Mac app, lightweight and fast
+- 🤖 **Fully automated setup** - downloads and configures runners automatically
 
 ## Why?
 
@@ -22,10 +23,21 @@ GitHub Actions self-hosted runners are great, but:
 
 ## How It Works
 
-1. Install runners for your GitHub repos
-2. Mac Runner manages them all from menu bar
-3. Click "Pause All" when doing resource-intensive work
-4. Click "Resume All" when ready to accept jobs again
+1. Click "Add Runner" in Mac Runner
+2. Enter your repo and GitHub token
+3. **Mac Runner automatically downloads, configures, and registers the runner!**
+4. Manage all runners from menu bar
+5. Click "Pause All" when doing resource-intensive work
+6. Click "Resume All" when ready to accept jobs again
+
+**Fully Automated Setup!** Mac Runner handles everything:
+- ✅ Downloads GitHub Actions runner binary
+- ✅ Configures with your repo
+- ✅ Registers with GitHub automatically
+- ✅ Starts the runner process
+- ✅ Monitors and manages lifecycle
+
+Perfect for repos like `ditto-assistant/ditto-app` and `ditto-assistant/backend` - add runners with just a few clicks!
 
 ## Architecture
 
