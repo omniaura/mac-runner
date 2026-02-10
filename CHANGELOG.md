@@ -1,3 +1,15 @@
+# [1.1.0](https://github.com/omniaura/mac-runner/compare/v1.0.2...v1.1.0) (2026-02-10)
+
+
+### Bug Fixes
+
+* move runner directory to ~/.mac-runner to avoid spaces in path ([a9d64eb](https://github.com/omniaura/mac-runner/commit/a9d64ebc54eb9a086df39fcbfe4f71b2ce1d7b00))
+
+
+### Features
+
+* gh CLI integration, dual CLI+GUI, self-hosted runner support ([6320419](https://github.com/omniaura/mac-runner/commit/6320419206f87a08dc0b915a34a9d2db8c0935b6))
+
 ## [1.0.2](https://github.com/omniaura/mac-runner/compare/v1.0.1...v1.0.2) (2026-02-10)
 
 
