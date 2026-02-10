@@ -2,7 +2,7 @@ import Foundation
 import KeychainAccess
 
 class TokenStorage {
-    static let shared = TokenStorage()
+    nonisolated(unsafe) static let shared = TokenStorage()
 
     private let keychain = Keychain(service: "com.omniaura.mac-runner")
 

@@ -2,7 +2,7 @@ import Foundation
 
 /// Handles downloading and installing GitHub Actions runner binary
 class RunnerInstaller {
-    static let shared = RunnerInstaller()
+    nonisolated(unsafe) static let shared = RunnerInstaller()
 
     private let session = URLSession.shared
     private let runnerVersion = "2.311.0" // Latest as of 2024
@@ -87,6 +87,7 @@ class RunnerInstaller {
     }
 
     /// One-click setup: Download, configure, and register runner
+    @discardableResult
     func setupRunner(
         repo: String,
         token: String,
