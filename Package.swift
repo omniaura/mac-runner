@@ -8,7 +8,7 @@ let package = Package(
     ],
     products: [
         .executable(
-            name: "MacRunner",
+            name: "mac-runner",
             targets: ["MacRunner"]
         )
     ],

@@ -16,7 +16,7 @@ enum CLIHandler {
         case "help", "--help", "-h":
             printUsage()
         case "version", "--version", "-v":
-            print("MacRunner \(version)")
+            print("mac-runner \(version)")
         case "auth":
             await handleAuth()
         case "list":
@@ -43,11 +43,11 @@ enum CLIHandler {
 
     private static func printUsage() {
         print("""
-        MacRunner - GitHub Actions self-hosted runner manager
+        mac-runner - GitHub Actions self-hosted runner manager
 
         USAGE:
-          MacRunner                     Launch GUI (menu bar app)
-          MacRunner <command> [options]  Run CLI command
+          mac-runner                     Launch GUI (menu bar app)
+          mac-runner <command> [options]  Run CLI command
 
         COMMANDS:
           auth              Show GitHub authentication status
@@ -65,12 +65,12 @@ enum CLIHandler {
           --labels <l1,l2>  Comma-separated labels (default: macos)
 
         EXAMPLES:
-          MacRunner auth
-          MacRunner add owner/repo --name my-runner --labels macos,arm64
-          MacRunner list
-          MacRunner start my-runner
-          MacRunner stop my-runner
-          MacRunner remove my-runner
+          mac-runner auth
+          mac-runner add owner/repo --name my-runner --labels macos,arm64
+          mac-runner list
+          mac-runner start my-runner
+          mac-runner stop my-runner
+          mac-runner remove my-runner
         """)
     }
 
@@ -94,13 +94,13 @@ enum CLIHandler {
         let nameW = max(runners.map(\.name.count).max() ?? 4, 4)
         let repoW = max(runners.map(\.repo.count).max() ?? 4, 4)
 
-        let header = "  \("NAME".padding(toLength: nameW, withPad: " ", startingAt: 0))  \("REPO".padding(toLength: repoW, withPad: " ", startingAt: 0))  STATUS    LABELS"
+        let header = "  \("NAME".padding(toLength: nameW, withPad: " ", startingAt: 0))  \("REPO".padding(toLength: repoW, withPad: " ", startingAt: 0))  STATUS      LABELS"
         print(header)
 
         for runner in runners {
             let status = "\(runner.status.icon) \(runner.status.rawValue)"
             let labels = runner.labels.joined(separator: ",")
-            let line = "  \(runner.name.padding(toLength: nameW, withPad: " ", startingAt: 0))  \(runner.repo.padding(toLength: repoW, withPad: " ", startingAt: 0))  \(status.padding(toLength: 8, withPad: " ", startingAt: 0))  \(labels)"
+            let line = "  \(runner.name.padding(toLength: nameW, withPad: " ", startingAt: 0))  \(runner.repo.padding(toLength: repoW, withPad: " ", startingAt: 0))  \(status.padding(toLength: 10, withPad: " ", startingAt: 0))  \(labels)"
             print(line)
         }
     }
@@ -109,7 +109,7 @@ enum CLIHandler {
     private static func handleAdd(args: [String]) async {
         guard let repo = args.first, repo.contains("/") else {
             print("Error: repository required in owner/repo format")
-            print("Usage: MacRunner add <owner/repo> [--name <name>] [--labels <l1,l2>]")
+            print("Usage: mac-runner add <owner/repo> [--name <name>] [--labels <l1,l2>]")
             return
         }
 
@@ -152,7 +152,7 @@ enum CLIHandler {
     private static func handleRemove(args: [String]) async {
         guard let name = args.first else {
             print("Error: runner name required")
-            print("Usage: MacRunner remove <name>")
+            print("Usage: mac-runner remove <name>")
             return
         }
 
@@ -175,7 +175,7 @@ enum CLIHandler {
     private static func handleStart(args: [String]) async {
         guard let name = args.first else {
             print("Error: runner name required")
-            print("Usage: MacRunner start <name>")
+            print("Usage: mac-runner start <name>")
             return
         }
 
@@ -198,7 +198,7 @@ enum CLIHandler {
     private static func handleStop(args: [String]) async {
         guard let name = args.first else {
             print("Error: runner name required")
-            print("Usage: MacRunner stop <name>")
+            print("Usage: mac-runner stop <name>")
             return
         }
 
@@ -227,7 +227,7 @@ enum CLIHandler {
         let paused = runners.filter { $0.status == .paused }.count
         let errored = runners.filter { $0.status == .error }.count
 
-        print("MacRunner Status")
+        print("mac-runner Status")
         print("  Total runners: \(runners.count)")
         print("  Running: \(running)")
         print("  Stopped: \(stopped)")
