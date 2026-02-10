@@ -70,6 +70,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Add Homebrew to PATH
+        run: echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
