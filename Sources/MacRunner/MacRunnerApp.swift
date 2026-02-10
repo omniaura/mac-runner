@@ -1,6 +1,10 @@
 import SwiftUI
 import AppKit
 
+extension Notification.Name {
+    static let openSettings = Notification.Name("openSettings")
+}
+
 struct MacRunnerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
@@ -13,15 +17,12 @@ struct MacRunnerApp: App {
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
-    static var shared: AppDelegate?
-
     var statusItem: NSStatusItem!
     var popover: NSPopover!
     let runnerManager = RunnerManager()
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        AppDelegate.shared = self
         NSApp.setActivationPolicy(.accessory)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -38,6 +39,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentViewController = NSHostingController(
             rootView: MenuBarView().environmentObject(runnerManager)
         )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOpenSettings),
+            name: .openSettings,
+            object: nil
+        )
     }
 
     @objc func togglePopover() {
@@ -50,7 +58,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func openSettings() {
+    @objc func handleOpenSettings() {
+        print("[Settings] Opening settings window...")
         popover.performClose(nil)
 
         // Must switch to .regular BEFORE showing the window —

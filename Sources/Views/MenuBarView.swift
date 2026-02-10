@@ -109,7 +109,8 @@ struct MenuBarView: View {
     private var footerButtons: some View {
         HStack {
             Button(action: {
-                AppDelegate.shared?.openSettings()
+                print("[Settings] Button clicked")
+                NotificationCenter.default.post(name: .openSettings, object: nil)
             }) {
                 Label("Settings", systemImage: "gear")
             }
