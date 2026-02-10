@@ -109,10 +109,20 @@ struct MenuBarView: View {
     private var footerButtons: some View {
         HStack {
             Button(action: {
-                if #available(macOS 14.0, *) {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                } else {
-                    NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                // Close the popover first, then open settings
+                NSApp.windows.compactMap { $0 as? NSPanel }.forEach { $0.close() }
+                DispatchQueue.main.async {
+                    NSApp.setActivationPolicy(.regular)
+                    if #available(macOS 14.0, *) {
+                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    } else {
+                        NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                    }
+                    NSApp.activate(ignoringOtherApps: true)
+                    // Return to accessory mode after settings window is open
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        NSApp.setActivationPolicy(.accessory)
+                    }
                 }
             }) {
                 Label("Settings", systemImage: "gear")
