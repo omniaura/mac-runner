@@ -10,6 +10,7 @@ cask "mac-runner" do
   depends_on macos: ">= :ventura"
 
   app "MacRunner.app"
+  binary "#{appdir}/MacRunner.app/Contents/MacOS/MacRunner", target: "mac-runner"
 
   zap trash: [
     "~/Library/Application Support/MacRunner",
