@@ -8,7 +8,7 @@ class RunnerManager: ObservableObject {
     @Published var error: String?
 
     private let configService = ConfigService()
-    private let githubService = GitHubService()
+    private let ghService = GHCLIService.shared
     private var runnerProcesses: [UUID: Process] = [:]
 
     init() {
@@ -37,12 +37,17 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Runner Management
 
-    func addRunner(name: String, repo: String, token: String, labels: [String]) async throws {
+    func addRunner(name: String, repo: String, labels: [String]) async throws {
         isLoading = true
         defer { isLoading = false }
 
-        // Validate GitHub token and repo access
-        try await githubService.validateAccess(repo: repo, token: token)
+        // Validate repo access via gh CLI
+        guard try await ghService.validateRepo(repo) else {
+            throw RunnerError.invalidRepo
+        }
+
+        // Get registration token from GitHub via gh CLI
+        let registrationToken = try await ghService.getRegistrationToken(for: repo)
 
         // Create runner
         let runner = Runner(
@@ -53,13 +58,10 @@ class RunnerManager: ObservableObject {
             status: .stopped
         )
 
-        // Store token securely
-        try TokenStorage.shared.saveToken(token, for: runner.id)
-
-        // Download, configure, and install runner automatically!
+        // Download, configure, and install runner
         try await RunnerInstaller.shared.setupRunner(
             repo: repo,
-            token: token,
+            registrationToken: registrationToken,
             name: name,
             labels: labels,
             runnerId: runner.id
@@ -79,19 +81,15 @@ class RunnerManager: ObservableObject {
             try await stopRunner(id)
         }
 
-        // Remove from GitHub
+        // Remove from GitHub via gh CLI
         if let runner = runners.first(where: { $0.id == id }) {
-            if let token = try? TokenStorage.shared.getToken(for: id) {
-                try await githubService.unregisterRunner(repo: runner.repo, token: token, runnerId: id)
+            if let ghId = runner.githubRunnerId {
+                try? await ghService.deleteRunner(repo: runner.repo, githubRunnerId: ghId)
             }
         }
 
         // Remove from list
         runners.removeAll(where: { $0.id == id })
-
-        // Clean up token
-        try? TokenStorage.shared.deleteToken(for: id)
-
         saveConfiguration()
     }
 
@@ -105,18 +103,16 @@ class RunnerManager: ObservableObject {
         }
 
         let runner = runners[index]
-        guard let token = try? TokenStorage.shared.getToken(for: id) else {
-            throw RunnerError.tokenNotFound
-        }
 
         // Get runner directory
         let runnerDir = try RunnerDirectory.path(for: id)
 
         // Ensure runner binary is downloaded and configured
         if !FileManager.default.fileExists(atPath: "\(runnerDir)/run.sh") {
+            let registrationToken = try await ghService.getRegistrationToken(for: runner.repo)
             try await RunnerInstaller.shared.setupRunner(
                 repo: runner.repo,
-                token: token,
+                registrationToken: registrationToken,
                 name: runner.name,
                 labels: runner.labels,
                 runnerId: id
@@ -179,6 +175,12 @@ class RunnerManager: ObservableObject {
         }
     }
 
+    // MARK: - Lookup
+
+    func runner(named name: String) -> Runner? {
+        runners.first(where: { $0.name == name })
+    }
+
     // MARK: - Private Helpers
 
     private func handleRunnerTermination(_ id: UUID) {
@@ -197,14 +199,14 @@ enum RunnerError: LocalizedError {
     case notFound
     case alreadyRunning
     case notRunning
-    case tokenNotFound
+    case invalidRepo
 
     var errorDescription: String? {
         switch self {
         case .notFound: return "Runner not found"
         case .alreadyRunning: return "Runner is already running"
         case .notRunning: return "Runner is not running"
-        case .tokenNotFound: return "GitHub token not found"
+        case .invalidRepo: return "Invalid repository or no access"
         }
     }
 }

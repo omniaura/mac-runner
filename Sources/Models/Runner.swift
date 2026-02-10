@@ -1,20 +1,22 @@
 import Foundation
 
-struct Runner: Identifiable, Codable {
+struct Runner: Identifiable, Codable, Sendable {
     let id: UUID
     var name: String
     var repo: String  // Format: "owner/repo"
     var labels: [String]
     var enabled: Bool
     var status: RunnerStatus
+    var githubRunnerId: Int?
 
     init(
         id: UUID = UUID(),
         name: String,
         repo: String,
-        labels: [String] = ["macos"],
+        labels: [String] = ["macos", "mac-runner"],
         enabled: Bool = true,
-        status: RunnerStatus = .stopped
+        status: RunnerStatus = .stopped,
+        githubRunnerId: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -22,10 +24,11 @@ struct Runner: Identifiable, Codable {
         self.labels = labels
         self.enabled = enabled
         self.status = status
+        self.githubRunnerId = githubRunnerId
     }
 }
 
-enum RunnerStatus: String, Codable {
+enum RunnerStatus: String, Codable, Sendable {
     case running
     case stopped
     case paused
@@ -50,7 +53,7 @@ enum RunnerStatus: String, Codable {
     }
 }
 
-struct RunnerConfig: Codable {
+struct RunnerConfig: Codable, Sendable {
     var runners: [Runner]
     var settings: AppSettings
 
@@ -60,7 +63,7 @@ struct RunnerConfig: Codable {
     )
 }
 
-struct AppSettings: Codable {
+struct AppSettings: Codable, Sendable {
     var startOnLogin: Bool
     var pauseOnBattery: Bool
     var quietHours: QuietHours?
@@ -72,7 +75,7 @@ struct AppSettings: Codable {
     )
 }
 
-struct QuietHours: Codable {
+struct QuietHours: Codable, Sendable {
     var enabled: Bool
     var start: String  // HH:mm format
     var end: String    // HH:mm format
