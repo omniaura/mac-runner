@@ -17,6 +17,11 @@ cask "mac-runner" do
   ]
 
   caveats <<~EOS
+    Mac Runner is currently unsigned. On first launch, macOS will block it.
+    To allow it, run:
+
+      xattr -cr /Applications/MacRunner.app
+
     To get started:
 
     1. Install and authenticate the GitHub CLI: brew install gh && gh auth login
