@@ -1,3 +1,10 @@
+## [1.1.4](https://github.com/omniaura/mac-runner/compare/v1.1.3...v1.1.4) (2026-02-10)
+
+
+### Bug Fixes
+
+* **ci:** add Homebrew PATH and setup-node to check-release job ([09b5fca](https://github.com/omniaura/mac-runner/commit/09b5fcaa676852137cc258c635393c9fc46a1a2d))
+
 ## [1.1.3](https://github.com/omniaura/mac-runner/compare/v1.1.2...v1.1.3) (2026-02-10)
 
 
