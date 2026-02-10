@@ -6,19 +6,22 @@ struct MacRunnerApp: App {
 
     var body: some Scene {
         Settings {
-            SettingsView()
-                .environmentObject(appDelegate.runnerManager)
+            EmptyView()
         }
     }
 }
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
+    static var shared: AppDelegate?
+
     var statusItem: NSStatusItem!
     var popover: NSPopover!
     let runnerManager = RunnerManager()
+    private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDelegate.shared = self
         NSApp.setActivationPolicy(.accessory)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -45,5 +48,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             }
         }
+    }
+
+    func openSettings() {
+        popover.performClose(nil)
+
+        if let window = settingsWindow {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let hostingController = NSHostingController(
+            rootView: SettingsView().environmentObject(runnerManager)
+        )
+
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "Mac Runner Settings"
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(NSSize(width: 400, height: 300))
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow = window
     }
 }
