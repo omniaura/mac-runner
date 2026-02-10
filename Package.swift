@@ -8,18 +8,15 @@ let package = Package(
     ],
     products: [
         .executable(
-            name: "MacRunner",
+            name: "mac-runner",
             targets: ["MacRunner"]
         )
     ],
-    dependencies: [
-        // Keychain access for secure token storage
-        .package(url: "https://github.com/kishikawakatsumi/KeychainAccess.git", from: "4.2.2"),
-    ],
+    dependencies: [],
     targets: [
         .executableTarget(
             name: "MacRunner",
-            dependencies: ["KeychainAccess"],
+            dependencies: [],
             path: "Sources"
         ),
         .testTarget(

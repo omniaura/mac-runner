@@ -40,17 +40,14 @@ class RunnerInstaller {
         print("Runner installed successfully to: \(directory)")
     }
 
-    /// Configure runner with GitHub registration token
+    /// Configure runner with a registration token (caller obtains it via GHCLIService)
     func configureRunner(
         at directory: String,
         repo: String,
-        token: String,
+        registrationToken: String,
         name: String,
         labels: [String]
     ) async throws {
-        // Get registration token from GitHub
-        let registrationToken = try await GitHubService().getRegistrationToken(repo: repo, token: token)
-
         // Build config command
         var args = [
             "./config.sh",
@@ -66,10 +63,11 @@ class RunnerInstaller {
             args.append(labels.joined(separator: ","))
         }
 
-        // Run config script
+        // Run config script — quote the directory to handle spaces in path (e.g. "Application Support")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = ["-c", "cd \(directory) && \(args.joined(separator: " "))"]
+        let escapedDir = directory.replacingOccurrences(of: "'", with: "'\\''")
+        process.arguments = ["-c", "cd '\(escapedDir)' && \(args.joined(separator: " "))"]
 
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -90,7 +88,7 @@ class RunnerInstaller {
     @discardableResult
     func setupRunner(
         repo: String,
-        token: String,
+        registrationToken: String,
         name: String,
         labels: [String],
         runnerId: UUID
@@ -104,7 +102,7 @@ class RunnerInstaller {
         try await configureRunner(
             at: directory,
             repo: repo,
-            token: token,
+            registrationToken: registrationToken,
             name: name,
             labels: labels
         )

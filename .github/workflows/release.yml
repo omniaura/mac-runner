@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner label (mac-runner = self-hosted, macos-latest = cloud)'
+        default: 'mac-runner'
+        type: choice
+        options:
+          - mac-runner
+          - macos-latest
 
 concurrency:
   group: release
@@ -48,7 +56,7 @@ jobs:
     name: Build & Release
     needs: check-release
     if: needs.check-release.outputs.new_release == 'true'
-    runs-on: macos-latest
+    runs-on: ${{ inputs.runner || 'mac-runner' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -74,9 +82,9 @@ jobs:
           echo "Creating universal binary..."
           mkdir -p .build/universal
           lipo -create \
-            .build/arm64-apple-macosx/release/MacRunner \
-            .build/x86_64-apple-macosx/release/MacRunner \
-            -output .build/universal/MacRunner
+            .build/arm64-apple-macosx/release/mac-runner \
+            .build/x86_64-apple-macosx/release/mac-runner \
+            -output .build/universal/mac-runner
 
       - name: Create app bundle
         env:
@@ -84,7 +92,7 @@ jobs:
         run: |
           mkdir -p build/MacRunner.app/Contents/MacOS
           mkdir -p build/MacRunner.app/Contents/Resources
-          cp .build/universal/MacRunner build/MacRunner.app/Contents/MacOS/
+          cp .build/universal/mac-runner build/MacRunner.app/Contents/MacOS/MacRunner
           chmod +x build/MacRunner.app/Contents/MacOS/MacRunner
           ./scripts/generate-info-plist.sh > build/MacRunner.app/Contents/Info.plist
 

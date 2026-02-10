@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @EnvironmentObject var runnerManager: RunnerManager
+    @State private var showAddRunner = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -12,6 +13,11 @@ struct MenuBarView: View {
                 Text("Mac Runner")
                     .font(.headline)
                 Spacer()
+                Button(action: { showAddRunner = true }) {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.plain)
+                .help("Add Runner")
             }
             .padding()
             .background(Color.gray.opacity(0.1))
@@ -34,6 +40,10 @@ struct MenuBarView: View {
             footerButtons
         }
         .frame(width: 300, height: 400)
+        .sheet(isPresented: $showAddRunner) {
+            AddRunnerView()
+                .environmentObject(runnerManager)
+        }
     }
 
     private var emptyState: some View {
@@ -51,7 +61,7 @@ struct MenuBarView: View {
                 .multilineTextAlignment(.center)
 
             Button("Add Runner") {
-                // Open add runner sheet
+                showAddRunner = true
             }
             .buttonStyle(.borderedProminent)
         }
@@ -64,6 +74,7 @@ struct MenuBarView: View {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(runnerManager.runners) { runner in
                     RunnerRow(runner: runner)
+                        .environmentObject(runnerManager)
                 }
             }
             .padding()
@@ -98,7 +109,11 @@ struct MenuBarView: View {
     private var footerButtons: some View {
         HStack {
             Button(action: {
-                // Open settings
+                if #available(macOS 14.0, *) {
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                } else {
+                    NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                }
             }) {
                 Label("Settings", systemImage: "gear")
             }
@@ -119,6 +134,7 @@ struct MenuBarView: View {
 
 struct RunnerRow: View {
     let runner: Runner
+    @EnvironmentObject var runnerManager: RunnerManager
 
     var body: some View {
         HStack(spacing: 12) {
@@ -149,14 +165,41 @@ struct RunnerRow: View {
 
             Spacer()
 
-            Text(runner.status.rawValue.capitalized)
-                .font(.caption)
-                .foregroundColor(.secondary)
+            // Inline start/stop button
+            Button(action: {
+                Task {
+                    if runner.status == .running {
+                        try? await runnerManager.stopRunner(runner.id)
+                    } else {
+                        try? await runnerManager.startRunner(runner.id)
+                    }
+                }
+            }) {
+                Image(systemName: runner.status == .running ? "stop.fill" : "play.fill")
+                    .foregroundColor(runner.status == .running ? .red : .green)
+            }
+            .buttonStyle(.plain)
+            .help(runner.status == .running ? "Stop" : "Start")
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
         .background(Color.gray.opacity(0.05))
         .cornerRadius(8)
+        .contextMenu {
+            if runner.status == .running {
+                Button("Stop") {
+                    Task { try? await runnerManager.stopRunner(runner.id) }
+                }
+            } else {
+                Button("Start") {
+                    Task { try? await runnerManager.startRunner(runner.id) }
+                }
+            }
+            Divider()
+            Button("Remove", role: .destructive) {
+                Task { try? await runnerManager.removeRunner(runner.id) }
+            }
+        }
     }
 
     private var statusColor: Color {
@@ -170,9 +213,82 @@ struct RunnerRow: View {
 }
 
 struct SettingsView: View {
+    @State private var isAuthenticated = false
+    @State private var authStatusText = "Checking..."
+    @State private var isLoggingIn = false
+
     var body: some View {
-        Text("Settings")
-            .frame(minWidth: 400, minHeight: 300)
+        TabView {
+            // GitHub Tab
+            VStack(alignment: .leading, spacing: 16) {
+                Text("GitHub Authentication")
+                    .font(.headline)
+
+                HStack {
+                    Circle()
+                        .fill(isAuthenticated ? Color.green : Color.red)
+                        .frame(width: 10, height: 10)
+                    Text(isAuthenticated ? "Authenticated" : "Not authenticated")
+                }
+
+                Text(authStatusText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
+
+                if !isAuthenticated {
+                    Button(action: {
+                        Task { await login() }
+                    }) {
+                        Label("Sign in with GitHub", systemImage: "person.badge.key")
+                    }
+                    .disabled(isLoggingIn)
+                }
+
+                Spacer()
+            }
+            .padding()
+            .tabItem { Label("GitHub", systemImage: "lock.shield") }
+
+            // About Tab
+            VStack(spacing: 12) {
+                Image(systemName: "figure.run")
+                    .font(.system(size: 48))
+                    .foregroundColor(.accentColor)
+
+                Text("Mac Runner")
+                    .font(.title2)
+                    .bold()
+
+                Text("Version \(CLIHandler.version)")
+                    .foregroundColor(.secondary)
+
+                Text("GitHub Actions self-hosted runner manager for macOS")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+
+                Spacer()
+            }
+            .padding()
+            .tabItem { Label("About", systemImage: "info.circle") }
+        }
+        .frame(minWidth: 400, minHeight: 300)
+        .task {
+            await checkAuth()
+        }
+    }
+
+    private func checkAuth() async {
+        isAuthenticated = await GHCLIService.shared.checkAuth()
+        authStatusText = await GHCLIService.shared.authStatus()
+    }
+
+    private func login() async {
+        isLoggingIn = true
+        defer { isLoggingIn = false }
+        try? await GHCLIService.shared.openLogin()
+        await checkAuth()
     }
 }
 
