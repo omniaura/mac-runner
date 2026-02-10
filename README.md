@@ -37,8 +37,6 @@ GitHub Actions self-hosted runners are great, but:
 - ✅ Starts the runner process
 - ✅ Monitors and manages lifecycle
 
-Perfect for repos like `ditto-assistant/ditto-app` and `ditto-assistant/backend` - add runners with just a few clicks!
-
 ## Architecture
 
 - **Swift/SwiftUI** - Native Mac app
