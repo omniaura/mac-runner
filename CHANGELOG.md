@@ -1,3 +1,11 @@
+## [1.0.1](https://github.com/omniaura/mac-runner/compare/v1.0.0...v1.0.1) (2026-02-10)
+
+
+### Bug Fixes
+
+* **ci:** stash cask changes before git pull in release workflow ([ccff4f5](https://github.com/omniaura/mac-runner/commit/ccff4f5331c982abd77d46e025ede78ee2b63002))
+* **ci:** sync with remote before semantic-release to prevent race condition ([e4daa2d](https://github.com/omniaura/mac-runner/commit/e4daa2d013d43649ab970c3e395492176841f8e5))
+
 # 1.0.0 (2026-02-10)
 
 
