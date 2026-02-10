@@ -145,6 +145,7 @@ The runner-fallback-action queries the GitHub REST API to check runner availabil
 
 ## Planned Features
 
+- [ ] Auto-provision CI tools (node, npm, gh) in runner environments
 - [ ] Automatic pause when battery low
 - [ ] Pause during specific hours
 - [ ] Resource usage monitoring
