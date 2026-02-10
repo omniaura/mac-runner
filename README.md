@@ -145,6 +145,7 @@ The runner-fallback-action queries the GitHub REST API to check runner availabil
 
 ## Planned Features
 
+- [ ] Container isolation via [Apple Containers](https://developer.apple.com/documentation/virtualization) — run each runner in an isolated Linux container so CI jobs can't touch your desktop, mount DMGs, or interfere with your dev environment
 - [ ] Auto-provision CI tools (node, npm, gh) in runner environments
 - [ ] Automatic pause when battery low
 - [ ] Pause during specific hours
