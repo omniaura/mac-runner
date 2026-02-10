@@ -129,7 +129,10 @@ jobs:
           cat Casks/mac-runner.rb
 
       - name: Sync with remote
-        run: git pull --rebase origin main
+        run: |
+          git stash
+          git pull --rebase origin main
+          git stash pop
 
       - name: Run semantic-release
         uses: cycjimmy/semantic-release-action@v4
