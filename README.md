@@ -125,7 +125,6 @@ This pattern is useful for any project that wants fast, free self-hosted builds 
 
 - [ ] Automatic pause when battery low
 - [ ] Pause during specific hours
-- [ ] Per-repo enable/disable
 - [ ] Resource usage monitoring
 - [ ] Notifications for job starts
 
