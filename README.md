@@ -34,12 +34,29 @@ GitHub Actions self-hosted runners are great, but:
 - **Runner Management** - Start/stop/monitor runners
 - **Persistent Config** - Remembers your runner setup
 
+## Installation
+
+### Homebrew
+
+```bash
+brew tap omniaura/tap https://github.com/omniaura/mac-runner
+brew install --cask mac-runner
+```
+
+### Direct Download
+
+Download the latest DMG from [Releases](https://github.com/omniaura/mac-runner/releases)
+
+See [INSTALL.md](INSTALL.md) for detailed installation instructions.
+
 ## Setup
 
-1. Download Mac Runner
-2. Add your GitHub repos
-3. Configure runner tokens
-4. Start managing runners!
+1. Launch Mac Runner from menu bar
+2. Click "Add Runner"
+3. Enter your GitHub PAT token and repo URL
+4. Runner starts automatically!
+
+See [INSTALL.md](INSTALL.md) for first-time setup guide.
 
 ## Features Coming Soon
 

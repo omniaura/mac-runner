@@ -1,0 +1,165 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION="0.0.0-dev"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Build release binary
+        run: |
+          swift build -c release --arch arm64 --arch x86_64
+
+          # Create app bundle
+          mkdir -p build/MacRunner.app/Contents/MacOS
+          mkdir -p build/MacRunner.app/Contents/Resources
+
+          # Copy binary
+          cp .build/release/MacRunner build/MacRunner.app/Contents/MacOS/
+
+          # Create Info.plist
+          cat > build/MacRunner.app/Contents/Info.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>MacRunner</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.omniaura.mac-runner</string>
+              <key>CFBundleName</key>
+              <string>Mac Runner</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${{ steps.get_version.outputs.VERSION }}</string>
+              <key>CFBundleVersion</key>
+              <string>${{ steps.get_version.outputs.VERSION }}</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>13.0</string>
+              <key>LSUIElement</key>
+              <true/>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Code sign (if certificates available)
+        if: ${{ secrets.MACOS_CERTIFICATE }}
+        run: |
+          echo "${{ secrets.MACOS_CERTIFICATE }}" | base64 --decode > certificate.p12
+          security create-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P "${{ secrets.MACOS_CERTIFICATE_PWD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          /usr/bin/codesign --force -s "${{ secrets.MACOS_CERTIFICATE_NAME }}" --options runtime build/MacRunner.app -v
+        continue-on-error: true
+
+      - name: Create DMG
+        run: |
+          # Install create-dmg
+          brew install create-dmg
+
+          # Create DMG
+          create-dmg \
+            --volname "Mac Runner" \
+            --volicon "build/MacRunner.app/Contents/Resources/AppIcon.icns" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "MacRunner.app" 175 120 \
+            --hide-extension "MacRunner.app" \
+            --app-drop-link 425 120 \
+            "build/MacRunner-${{ steps.get_version.outputs.VERSION }}.dmg" \
+            "build/MacRunner.app" || true
+
+          # Fallback: create simple DMG if create-dmg fails
+          if [ ! -f "build/MacRunner-${{ steps.get_version.outputs.VERSION }}.dmg" ]; then
+            hdiutil create -volname "Mac Runner" -srcfolder build/MacRunner.app -ov -format UDZO "build/MacRunner-${{ steps.get_version.outputs.VERSION }}.dmg"
+          fi
+
+      - name: Create ZIP for Homebrew
+        run: |
+          cd build
+          zip -r "MacRunner-${{ steps.get_version.outputs.VERSION }}.zip" MacRunner.app
+
+          # Generate SHA256 for Homebrew formula
+          SHA256=$(shasum -a 256 "MacRunner-${{ steps.get_version.outputs.VERSION }}.zip" | awk '{print $1}')
+          echo "SHA256=$SHA256" >> $GITHUB_OUTPUT
+          echo "SHA256 for Homebrew: $SHA256"
+        id: package
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            build/MacRunner-${{ steps.get_version.outputs.VERSION }}.dmg
+            build/MacRunner-${{ steps.get_version.outputs.VERSION }}.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Homebrew Formula
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cat > Formula/mac-runner.rb << EOF
+          class MacRunner < Formula
+            desc "Menu bar app for managing GitHub Actions self-hosted runners"
+            homepage "https://github.com/omniaura/mac-runner"
+            url "https://github.com/omniaura/mac-runner/releases/download/v${{ steps.get_version.outputs.VERSION }}/MacRunner-${{ steps.get_version.outputs.VERSION }}.zip"
+            sha256 "${{ steps.package.outputs.SHA256 }}"
+            version "${{ steps.get_version.outputs.VERSION }}"
+
+            depends_on :macos
+
+            def install
+              prefix.install "MacRunner.app"
+            end
+
+            def caveats
+              <<~EOS
+                Mac Runner has been installed to:
+                  #{prefix}/MacRunner.app
+
+                To start Mac Runner:
+                  open #{prefix}/MacRunner.app
+
+                To run at login, add Mac Runner to your Login Items in System Preferences.
+              EOS
+            end
+          end
+          EOF
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add Formula/mac-runner.rb
+          git commit -m "Update Homebrew formula to v${{ steps.get_version.outputs.VERSION }}" || echo "No changes to commit"
+          git push origin main || echo "Failed to push formula update"
