@@ -36,6 +36,16 @@ brew install --cask mac-runner
 
 Download the latest DMG from [Releases](https://github.com/omniaura/mac-runner/releases)
 
+### Unsigned Binary
+
+Mac Runner is not code-signed yet. macOS Gatekeeper will block the first launch. To allow it:
+
+```bash
+xattr -cr /Applications/MacRunner.app
+```
+
+Or: right-click the app → Open → click "Open" in the dialog.
+
 ### Prerequisites
 
 - macOS 13+
