@@ -17,13 +17,13 @@ cask "mac-runner" do
   ]
 
   caveats <<~EOS
-    Mac Runner is in early development. To use:
+    To get started:
 
-    1. Launch from Applications
-    2. Click the runner icon in menu bar
-    3. Add your GitHub repos with PAT token
+    1. Launch from Applications or run: open -a "Mac Runner"
+    2. Click the runner icon in the menu bar
+    3. Add your GitHub repos with a PAT token
     4. Runners will be automatically configured!
 
-    Note: First release pending. The app will be available after v0.1.0 is published.
+    For help: https://github.com/omniaura/mac-runner
   EOS
 end
