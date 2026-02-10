@@ -1,3 +1,13 @@
+## [1.1.3](https://github.com/omniaura/mac-runner/compare/v1.1.2...v1.1.3) (2026-02-10)
+
+
+### Bug Fixes
+
+* **ci:** add administration:read permission for runner fallback ([1d229a9](https://github.com/omniaura/mac-runner/commit/1d229a92ed2b7f3cd7b11fab8cf52029c07c8e2a))
+* **ci:** add Homebrew to PATH for self-hosted runner ([54146ba](https://github.com/omniaura/mac-runner/commit/54146baf03c5d3bd92625d417c3e28c583a5effb))
+* **ci:** use mac-runner directly, remove runner-fallback-action ([6479203](https://github.com/omniaura/mac-runner/commit/6479203e452bd2ef9cef8cd35e0d87bd18487ba9))
+* **ci:** use RUNNER_TOKEN for runner-fallback-action ([d1e99c8](https://github.com/omniaura/mac-runner/commit/d1e99c8e66df7a8fcf25f0d27abe489451e5049d))
+
 ## [1.1.2](https://github.com/omniaura/mac-runner/compare/v1.1.1...v1.1.2) (2026-02-10)
 
 
