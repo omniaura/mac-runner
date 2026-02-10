@@ -100,8 +100,6 @@ jobs:
     outputs:
       runner: ${{ steps.runner.outputs.use-runner }}
     steps:
-      # Detect if self-hosted runner is online, fall back to cloud if not
-      # https://github.com/mikehardy/runner-fallback-action
       - name: Select runner
         id: runner
         uses: mikehardy/runner-fallback-action@v1
@@ -109,7 +107,7 @@ jobs:
           primary-runner: mac-runner
           fallback-runner: macos-latest
           fallback-on-error: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.RUNNER_TOKEN }}
 
   build:
     needs: preflight
@@ -124,6 +122,20 @@ jobs:
 | No | `macos-latest` (cloud) | GitHub Actions minutes |
 
 This pattern is useful for any project that wants fast, free self-hosted builds when available, with reliable cloud fallback. See the [community discussion](https://github.com/orgs/community/discussions/20019) for background on why this isn't built into GitHub Actions natively.
+
+### Token Setup
+
+The runner-fallback-action queries the GitHub REST API to check runner availability. This requires a token with admin read access — the default `GITHUB_TOKEN` does not have this permission.
+
+1. Create a [fine-grained Personal Access Token](https://github.com/settings/personal-access-tokens/new):
+   - **Repository access:** select "Only select repositories" and pick your repo
+   - **Permissions → Repository → Administration:** Read-only
+2. Add it as a repository secret named `RUNNER_TOKEN`:
+   ```bash
+   gh secret set RUNNER_TOKEN
+   ```
+
+> **Note:** If the token is missing or invalid, `fallback-on-error: true` ensures the workflow still runs — it just falls back to cloud runners.
 
 ### References
 

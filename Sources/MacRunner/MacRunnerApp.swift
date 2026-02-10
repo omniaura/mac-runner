@@ -59,7 +59,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func handleOpenSettings() {
-        print("[Settings] Opening settings window...")
         popover.performClose(nil)
 
         // Must switch to .regular BEFORE showing the window —
