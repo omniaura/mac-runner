@@ -1,3 +1,10 @@
+## [1.1.2](https://github.com/omniaura/mac-runner/compare/v1.1.1...v1.1.2) (2026-02-10)
+
+
+### Bug Fixes
+
+* settings button opens settings window ([#6](https://github.com/omniaura/mac-runner/issues/6)) ([65b6e9e](https://github.com/omniaura/mac-runner/commit/65b6e9e1e965ded86bb40efb7ee06d556228d9a6))
+
 ## [1.1.1](https://github.com/omniaura/mac-runner/compare/v1.1.0...v1.1.1) (2026-02-10)
 
 
