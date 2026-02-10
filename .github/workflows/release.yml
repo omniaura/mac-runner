@@ -128,6 +128,9 @@ jobs:
           echo "Updated cask to version ${VERSION} with SHA256 ${SHA256}"
           cat Casks/mac-runner.rb
 
+      - name: Sync with remote
+        run: git pull --rebase origin main
+
       - name: Run semantic-release
         uses: cycjimmy/semantic-release-action@v4
         with:
