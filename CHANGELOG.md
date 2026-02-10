@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/omniaura/mac-runner/compare/v1.1.0...v1.1.1) (2026-02-10)
+
+
+### Bug Fixes
+
+* update cask caveats for gh CLI ([#5](https://github.com/omniaura/mac-runner/issues/5)) ([3ec611e](https://github.com/omniaura/mac-runner/commit/3ec611ee3111a4f348ad92d81e49bb8cc5ab6bec))
+
 # [1.1.0](https://github.com/omniaura/mac-runner/compare/v1.0.2...v1.1.0) (2026-02-10)
 
 
