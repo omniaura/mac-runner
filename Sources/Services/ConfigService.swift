@@ -38,14 +38,12 @@ class ConfigService {
 }
 
 class RunnerDirectory {
+    /// Use ~/.mac-runner/runners/ instead of Application Support to avoid
+    /// spaces in paths, which break GitHub Actions runner script execution.
     static func path(for runnerId: UUID) throws -> String {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!
-
-        let runnerDir = appSupport
-            .appendingPathComponent("MacRunner", isDirectory: true)
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let runnerDir = home
+            .appendingPathComponent(".mac-runner", isDirectory: true)
             .appendingPathComponent("runners", isDirectory: true)
             .appendingPathComponent(runnerId.uuidString, isDirectory: true)
 
