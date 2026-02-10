@@ -121,6 +121,14 @@ This pattern is useful for any project that wants fast, free self-hosted builds 
 - [`jimmygchen/runner-fallback-action`](https://github.com/jimmygchen/runner-fallback-action) — original (archived)
 - [GitHub Community: Auto-switch to GitHub runner if self-hosted unavailable](https://github.com/orgs/community/discussions/20019)
 
+## Planned Features
+
+- [ ] Automatic pause when battery low
+- [ ] Pause during specific hours
+- [ ] Per-repo enable/disable
+- [ ] Resource usage monitoring
+- [ ] Notifications for job starts
+
 ## Architecture
 
 - **Swift 6 / SwiftUI** — Native Mac app
