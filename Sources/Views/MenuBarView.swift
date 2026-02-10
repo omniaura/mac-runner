@@ -109,11 +109,8 @@ struct MenuBarView: View {
     private var footerButtons: some View {
         HStack {
             Button(action: {
-                if #available(macOS 14.0, *) {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                } else {
-                    NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-                }
+                print("[Settings] Button clicked")
+                NotificationCenter.default.post(name: .openSettings, object: nil)
             }) {
                 Label("Settings", systemImage: "gear")
             }

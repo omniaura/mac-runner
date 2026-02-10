@@ -1,13 +1,16 @@
 import SwiftUI
 import AppKit
 
+extension Notification.Name {
+    static let openSettings = Notification.Name("openSettings")
+}
+
 struct MacRunnerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
         Settings {
-            SettingsView()
-                .environmentObject(appDelegate.runnerManager)
+            EmptyView()
         }
     }
 }
@@ -17,6 +20,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var popover: NSPopover!
     let runnerManager = RunnerManager()
+    private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -35,6 +39,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentViewController = NSHostingController(
             rootView: MenuBarView().environmentObject(runnerManager)
         )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOpenSettings),
+            name: .openSettings,
+            object: nil
+        )
     }
 
     @objc func togglePopover() {
@@ -44,6 +55,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             }
+        }
+    }
+
+    @objc func handleOpenSettings() {
+        print("[Settings] Opening settings window...")
+        popover.performClose(nil)
+
+        // Must switch to .regular BEFORE showing the window —
+        // macOS ignores makeKeyAndOrderFront for .accessory apps.
+        NSApp.setActivationPolicy(.regular)
+
+        if let window = settingsWindow {
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let hostingController = NSHostingController(
+            rootView: SettingsView().environmentObject(runnerManager)
+        )
+
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "Mac Runner Settings"
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(NSSize(width: 400, height: 300))
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow = window
+
+        // Revert to .accessory (hide dock icon) when settings closes
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.settingsWindow = nil
+            NSApp.setActivationPolicy(.accessory)
         }
     }
 }

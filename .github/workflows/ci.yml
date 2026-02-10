@@ -8,10 +8,29 @@ concurrency:
   group: ci-${{ github.head_ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
+  select-runner:
+    name: Select runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.runner.outputs.use-runner }}
+    steps:
+      - name: Select runner
+        id: runner
+        uses: mikehardy/runner-fallback-action@v1
+        with:
+          primary-runner: mac-runner
+          fallback-runner: macos-latest
+          fallback-on-error: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
   build-and-test:
     name: Build & Test
-    runs-on: macos-latest
+    needs: select-runner
+    runs-on: ${{ fromJson(needs.select-runner.outputs.runner) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
