@@ -53,8 +53,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func openSettings() {
         popover.performClose(nil)
 
+        // Must switch to .regular BEFORE showing the window —
+        // macOS ignores makeKeyAndOrderFront for .accessory apps.
+        NSApp.setActivationPolicy(.regular)
+
         if let window = settingsWindow {
             window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
             NSApp.activate(ignoringOtherApps: true)
             return
         }
@@ -70,7 +75,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow = window
+
+        // Revert to .accessory (hide dock icon) when settings closes
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.settingsWindow = nil
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }
