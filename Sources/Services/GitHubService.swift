@@ -1,6 +1,6 @@
 import Foundation
 
-class GitHubService {
+final class GitHubService: Sendable {
     private let session = URLSession.shared
 
     func validateAccess(repo: String, token: String) async throws {
