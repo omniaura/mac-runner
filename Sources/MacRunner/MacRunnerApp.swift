@@ -4,13 +4,11 @@ import AppKit
 @main
 struct MacRunnerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var runnerManager = RunnerManager()
 
     var body: some Scene {
-        // Menu bar app - no windows
         Settings {
             SettingsView()
-                .environmentObject(runnerManager)
+                .environmentObject(appDelegate.runnerManager)
         }
     }
 }
@@ -19,12 +17,11 @@ struct MacRunnerApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var popover: NSPopover!
+    let runnerManager = RunnerManager()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Hide dock icon - we're a menu bar app
         NSApp.setActivationPolicy(.accessory)
 
-        // Create menu bar item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
@@ -33,11 +30,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
         }
 
-        // Create popover
         popover = NSPopover()
         popover.contentSize = NSSize(width: 300, height: 400)
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: MenuBarView())
+        popover.contentViewController = NSHostingController(
+            rootView: MenuBarView().environmentObject(runnerManager)
+        )
     }
 
     @objc func togglePopover() {
