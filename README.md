@@ -77,6 +77,16 @@ See [INSTALL.md](INSTALL.md) for first-time setup guide.
 - [ ] Notifications for job starts
 - [ ] Dark mode support
 
+## Contributing
+
+We use [Conventional Commits](https://www.conventionalcommits.org/) for automatic versioning:
+
+- `feat:` - New feature (0.1.0 → 0.2.0)
+- `fix:` - Bug fix (0.1.0 → 0.1.1)
+- `chore:` - No release
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
+
 ## Development
 
 Built with:
@@ -84,6 +94,7 @@ Built with:
 - SwiftUI
 - AppKit (menu bar)
 - GitHub Actions Runner API
+- Semantic Release (automated versioning)
 
 ## License
 
