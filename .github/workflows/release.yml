@@ -13,6 +13,7 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
+  administration: read
 
 jobs:
   check-release:
