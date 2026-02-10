@@ -4,14 +4,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      runner:
-        description: 'Runner label (mac-runner = self-hosted, macos-latest = cloud)'
-        default: 'mac-runner'
-        type: choice
-        options:
-          - mac-runner
-          - macos-latest
 
 concurrency:
   group: release
@@ -29,6 +21,7 @@ jobs:
     outputs:
       new_release: ${{ steps.semantic.outputs.new_release_published }}
       version: ${{ steps.semantic.outputs.new_release_version }}
+      runner: ${{ steps.runner.outputs.use-runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,16 +40,29 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Automatically detect if a self-hosted mac-runner is online.
+      # If yes → build on local Mac (faster, free). If no → fall back to cloud.
+      # https://github.com/mikehardy/runner-fallback-action
+      - name: Select runner
+        id: runner
+        uses: mikehardy/runner-fallback-action@v1
+        with:
+          primary-runner: mac-runner
+          fallback-runner: macos-latest
+          fallback-on-error: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Release check result
         run: |
           echo "New release: ${{ steps.semantic.outputs.new_release_published }}"
           echo "Version: ${{ steps.semantic.outputs.new_release_version }}"
+          echo "Runner: ${{ steps.runner.outputs.use-runner }}"
 
   build-and-release:
     name: Build & Release
     needs: check-release
     if: needs.check-release.outputs.new_release == 'true'
-    runs-on: ${{ inputs.runner || 'mac-runner' }}
+    runs-on: ${{ fromJson(needs.check-release.outputs.runner) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
