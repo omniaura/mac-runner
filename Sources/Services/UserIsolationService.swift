@@ -215,12 +215,14 @@ class UserIsolationService {
 
     func installSudoersEntry(mainUsername: String, serviceUsername: String) throws {
         // Allow the main user to run sudo -u _macrunner for bash and kill without password
+        // Restrict bash to specific arguments patterns needed for runner management
         let entry = """
         # Mac Runner: allow \(mainUsername) to manage runner processes as \(serviceUsername)
-        \(mainUsername) ALL=(\(serviceUsername)) NOPASSWD: /bin/bash
+        \(mainUsername) ALL=(\(serviceUsername)) NOPASSWD: /bin/bash -l -c *
+        \(mainUsername) ALL=(\(serviceUsername)) NOPASSWD: /bin/zsh -l -c *
         \(mainUsername) ALL=(root) NOPASSWD: /usr/bin/kill
-        \(mainUsername) ALL=(root) NOPASSWD: /bin/mkdir
-        \(mainUsername) ALL=(root) NOPASSWD: /usr/sbin/chown
+        \(mainUsername) ALL=(root) NOPASSWD: /bin/mkdir -p /Users/\(serviceUsername)/*
+        \(mainUsername) ALL=(root) NOPASSWD: /usr/sbin/chown -R \(serviceUsername)\\:staff /Users/\(serviceUsername)/*
         """
 
         // Write to a temp file, validate, then move to sudoers.d
