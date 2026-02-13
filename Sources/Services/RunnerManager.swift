@@ -69,21 +69,19 @@ class RunnerManager: ObservableObject {
     // MARK: - Login Item
 
     private func syncLoginItem() {
-        if #available(macOS 13.0, *) {
-            let service = SMAppService.mainApp
-            do {
-                if currentSettings.startOnLogin {
-                    if service.status != .enabled {
-                        try service.register()
-                    }
-                } else {
-                    if service.status == .enabled {
-                        try service.unregister()
-                    }
+        let service = SMAppService.mainApp
+        do {
+            if currentSettings.startOnLogin {
+                if service.status != .enabled {
+                    try service.register()
                 }
-            } catch {
-                self.error = "Failed to update login item: \(error.localizedDescription)"
+            } else {
+                if service.status == .enabled {
+                    try service.unregister()
+                }
             }
+        } catch {
+            self.error = "Failed to update login item: \(error.localizedDescription)"
         }
     }
 
