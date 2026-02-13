@@ -12,10 +12,16 @@ class RunnerManager: ObservableObject {
     private let isolationService = UserIsolationService.shared
     private var runnerProcesses: [UUID: Process] = [:]
     private(set) var currentSettings: AppSettings = .default
+    private var statusPollingTask: Task<Void, Never>?
 
     init() {
         loadConfiguration()
         reconcileRunnerStates()
+        startStatusPolling()
+    }
+
+    deinit {
+        statusPollingTask?.cancel()
     }
 
     // MARK: - Configuration
@@ -316,6 +322,75 @@ class RunnerManager: ObservableObject {
             }
         }
         if changed { saveConfiguration() }
+    }
+
+    // MARK: - Status Polling
+
+    /// Poll GitHub API every 10 seconds to update runner busy state
+    private func startStatusPolling() {
+        statusPollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.updateRunnerStatuses()
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
+    }
+
+    private func updateRunnerStatuses() async {
+        // Group runners by repo to minimize API calls
+        let runnersByRepo = Dictionary(grouping: runners) { $0.repo }
+
+        for (repo, runnersInRepo) in runnersByRepo {
+            // Only check runners that are currently running
+            let runningRunners = runnersInRepo.filter { $0.status == .running }
+            guard !runningRunners.isEmpty else { continue }
+
+            // Fetch remote runner status from GitHub
+            guard let remoteRunners = try? await ghService.listRemoteRunners(for: repo) else {
+                continue
+            }
+
+            // Update busy status for each runner
+            var changed = false
+            for runner in runningRunners {
+                if let index = runners.firstIndex(where: { $0.id == runner.id }),
+                   let remoteRunner = remoteRunners.first(where: { $0.name == runner.name }) {
+                    if runners[index].busy != remoteRunner.busy {
+                        runners[index].busy = remoteRunner.busy
+                        changed = true
+                    }
+                }
+            }
+
+            if changed {
+                // Don't save config for transient busy state changes
+                objectWillChange.send()
+            }
+        }
+    }
+
+    // MARK: - Duplicate Runner
+
+    /// Create a duplicate of an existing runner with a new name
+    func duplicateRunner(_ id: UUID) async throws {
+        guard let originalRunner = runners.first(where: { $0.id == id }) else {
+            throw RunnerError.notFound
+        }
+
+        // Generate new name with incrementing suffix
+        var newName = "\(originalRunner.name)-2"
+        var counter = 2
+        while runners.contains(where: { $0.name == newName }) {
+            counter += 1
+            newName = "\(originalRunner.name)-\(counter)"
+        }
+
+        // Create duplicate with same settings
+        try await addRunner(
+            name: newName,
+            repo: originalRunner.repo,
+            labels: originalRunner.labels
+        )
     }
 
     // MARK: - Private Helpers

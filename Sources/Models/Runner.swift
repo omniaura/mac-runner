@@ -8,6 +8,7 @@ struct Runner: Identifiable, Codable, Sendable {
     var enabled: Bool
     var status: RunnerStatus
     var githubRunnerId: Int?
+    var busy: Bool  // Whether runner is currently executing a job
 
     init(
         id: UUID = UUID(),
@@ -16,7 +17,8 @@ struct Runner: Identifiable, Codable, Sendable {
         labels: [String] = ["macos", "mac-runner"],
         enabled: Bool = true,
         status: RunnerStatus = .stopped,
-        githubRunnerId: Int? = nil
+        githubRunnerId: Int? = nil,
+        busy: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -25,6 +27,20 @@ struct Runner: Identifiable, Codable, Sendable {
         self.enabled = enabled
         self.status = status
         self.githubRunnerId = githubRunnerId
+        self.busy = busy
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        repo = try container.decode(String.self, forKey: .repo)
+        labels = try container.decode([String].self, forKey: .labels)
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+        status = try container.decode(RunnerStatus.self, forKey: .status)
+        githubRunnerId = try container.decodeIfPresent(Int.self, forKey: .githubRunnerId)
+        // Default busy to false for backward compatibility
+        busy = try container.decodeIfPresent(Bool.self, forKey: .busy) ?? false
     }
 }
 

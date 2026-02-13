@@ -140,8 +140,31 @@ struct RunnerRow: View {
                 .frame(width: 8, height: 8)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(runner.name)
-                    .font(.headline)
+                HStack(spacing: 6) {
+                    Text(runner.name)
+                        .font(.headline)
+
+                    // Show execution status badge when runner is busy
+                    if runner.status == .running && runner.busy {
+                        Text("EXECUTING")
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.orange)
+                            .cornerRadius(4)
+                    } else if runner.status == .running {
+                        Text("IDLE")
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.gray.opacity(0.2))
+                            .cornerRadius(4)
+                    }
+                }
 
                 Text(runner.repo)
                     .font(.caption)
@@ -190,6 +213,10 @@ struct RunnerRow: View {
                 Button("Start") {
                     Task { try? await runnerManager.startRunner(runner.id) }
                 }
+            }
+            Divider()
+            Button("Duplicate") {
+                Task { try? await runnerManager.duplicateRunner(runner.id) }
             }
             Divider()
             Button("Remove", role: .destructive) {
