@@ -63,16 +63,67 @@ struct RunnerConfig: Codable, Sendable {
     )
 }
 
+enum IsolationMode: Codable, Sendable, Equatable {
+    case none
+    case dedicatedUser(username: String)
+
+    static let defaultUsername = "_macrunner"
+
+    private enum CodingKeys: String, CodingKey {
+        case type, username
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .none:
+            try container.encode("none", forKey: .type)
+        case .dedicatedUser(let username):
+            try container.encode("dedicatedUser", forKey: .type)
+            try container.encode(username, forKey: .username)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "dedicatedUser":
+            let username = try container.decode(String.self, forKey: .username)
+            self = .dedicatedUser(username: username)
+        default:
+            self = .none
+        }
+    }
+}
+
 struct AppSettings: Codable, Sendable {
     var startOnLogin: Bool
     var pauseOnBattery: Bool
     var quietHours: QuietHours?
+    var isolationMode: IsolationMode
 
     static let `default` = AppSettings(
         startOnLogin: false,
         pauseOnBattery: false,
-        quietHours: nil
+        quietHours: nil,
+        isolationMode: .none
     )
+
+    init(startOnLogin: Bool = false, pauseOnBattery: Bool = false, quietHours: QuietHours? = nil, isolationMode: IsolationMode = .none) {
+        self.startOnLogin = startOnLogin
+        self.pauseOnBattery = pauseOnBattery
+        self.quietHours = quietHours
+        self.isolationMode = isolationMode
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        startOnLogin = try container.decodeIfPresent(Bool.self, forKey: .startOnLogin) ?? false
+        pauseOnBattery = try container.decodeIfPresent(Bool.self, forKey: .pauseOnBattery) ?? false
+        quietHours = try container.decodeIfPresent(QuietHours.self, forKey: .quietHours)
+        isolationMode = try container.decodeIfPresent(IsolationMode.self, forKey: .isolationMode) ?? .none
+    }
 }
 
 struct QuietHours: Codable, Sendable {
