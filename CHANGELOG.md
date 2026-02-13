@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/omniaura/mac-runner/compare/v1.3.0...v1.4.0) (2026-02-13)
+
+
+### Features
+
+* add runner execution status and duplicate functionality ([caa37d0](https://github.com/omniaura/mac-runner/commit/caa37d0cc9afb2cc06468a3198f38ccf500935c0))
+
 # [1.3.0](https://github.com/omniaura/mac-runner/compare/v1.2.0...v1.3.0) (2026-02-13)
 
 
