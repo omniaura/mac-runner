@@ -236,12 +236,36 @@ struct RunnerRow: View {
 }
 
 struct SettingsView: View {
+    @EnvironmentObject var runnerManager: RunnerManager
     @State private var isAuthenticated = false
     @State private var authStatusText = "Checking..."
     @State private var isLoggingIn = false
 
     var body: some View {
         TabView {
+            // General Tab
+            VStack(alignment: .leading, spacing: 16) {
+                Text("General")
+                    .font(.headline)
+
+                Toggle("Launch at Login", isOn: Binding(
+                    get: { runnerManager.currentSettings.startOnLogin },
+                    set: { newValue in
+                        var settings = runnerManager.currentSettings
+                        settings.startOnLogin = newValue
+                        runnerManager.updateSettings(settings)
+                    }
+                ))
+
+                Text("When enabled, Mac Runner starts automatically when you log in and restarts any runners that were previously running.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Spacer()
+            }
+            .padding()
+            .tabItem { Label("General", systemImage: "gear") }
+
             // GitHub Tab
             VStack(alignment: .leading, spacing: 16) {
                 Text("GitHub Authentication")
