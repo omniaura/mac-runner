@@ -57,11 +57,32 @@ class ContainerIsolationService {
     ///
     /// - Throws: If initialization fails (e.g., kernel not found, networking unavailable).
     func initialize() async throws {
-        // TODO: Phase 3 implementation
-        // 1. Load kernel from kernelPath
-        // 2. Create ContainerManager with kernel and network
-        // 3. Fetch vminit from registry if needed
-        fatalError("Not yet implemented - Phase 3")
+        // Verify kernel exists
+        guard FileManager.default.fileExists(atPath: kernelPath.path) else {
+            throw ContainerIsolationError.kernelNotFound(kernelPath)
+        }
+
+        // Create image store directory if needed
+        try FileManager.default.createDirectory(
+            at: imageStorePath,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+
+        // Load the Linux kernel
+        let kernel = Kernel(path: kernelPath, platform: .linuxArm)
+
+        // Create network configuration (vmnet shared mode)
+        let network = try ContainerManager.VmnetNetwork()
+
+        // Initialize container manager with kernel and network
+        // vminit will be fetched automatically from registry on first use
+        self.containerManager = try await ContainerManager(
+            kernel: kernel,
+            initfsReference: "ghcr.io/apple/containerization/vminit:0.13.0",
+            network: network,
+            imageStoreLocation: imageStorePath
+        )
     }
 
     /// Creates a new container for a GitHub Actions runner.
@@ -73,14 +94,72 @@ class ContainerIsolationService {
     /// - Throws: If container creation fails.
     func createRunnerContainer(
         id: String,
-        config: RunnerConfiguration
+        config: ContainerRunnerConfiguration
     ) async throws -> LinuxContainer {
-        // TODO: Phase 3 implementation
-        // 1. Get container manager (ensure initialized)
-        // 2. Determine container image (default or user-specified)
-        // 3. Create container with proper configuration
-        // 4. Store in activeContainers
-        fatalError("Not yet implemented - Phase 3")
+        // Ensure container manager is initialized
+        guard let manager = containerManager else {
+            throw ContainerIsolationError.notInitialized
+        }
+
+        // Determine which container image to use
+        let imageReference = config.containerImage ?? ContainerRunnerConfiguration.defaultRunnerImage
+
+        // Create container with specified configuration
+        let container = try await manager.create(
+            id,
+            reference: imageReference,
+            rootfsSizeInBytes: config.diskSizeInBytes
+        ) { containerConfig in
+            // Resource allocation
+            containerConfig.cpus = config.cpuCount
+            containerConfig.memoryInBytes = config.memoryInBytes
+
+            // Mount runner workspace into container
+            containerConfig.mounts.append(
+                Mount(
+                    source: config.workspaceURL.path,
+                    destination: "/runner/_work",
+                    type: "virtiofs"
+                )
+            )
+
+            // Configure the runner process
+            containerConfig.process.arguments = [
+                "/bin/bash",
+                "-c",
+                """
+                # Install GitHub Actions runner if not present
+                if [ ! -f /runner/run.sh ]; then
+                    cd /runner
+                    curl -o actions-runner-linux-arm64.tar.gz -L https://github.com/actions/runner/releases/latest/download/actions-runner-linux-arm64.tar.gz
+                    tar xzf actions-runner-linux-arm64.tar.gz
+                    rm actions-runner-linux-arm64.tar.gz
+                fi
+
+                # Configure and start runner
+                cd /runner
+                ./config.sh --unattended --url \(config.repositoryURL) --token \(config.registrationToken)
+                ./run.sh
+                """
+            ]
+            containerConfig.process.workingDirectory = "/runner"
+
+            // Set environment variables
+            containerConfig.process.environment = [
+                "RUNNER_ALLOW_RUNASROOT": "1"
+            ]
+
+            // Enable nested virtualization if requested
+            if config.enableNestedVirtualization {
+                // Note: This may not be supported in all versions of the framework
+                // containerConfig.enableNestedVirtualization = true
+            }
+        }
+
+        // Store in active containers map
+        activeContainers[id] = container
+
+        return container
     }
 
     /// Starts a container.
@@ -107,20 +186,63 @@ class ContainerIsolationService {
     /// - Parameter id: The container ID to delete.
     /// - Throws: If cleanup fails.
     func deleteContainer(id: String) async throws {
-        // TODO: Phase 3 implementation
-        // 1. Stop container if running
-        // 2. Remove from activeContainers
-        // 3. Clean up container resources via manager
-        fatalError("Not yet implemented - Phase 3")
+        guard let manager = containerManager else {
+            throw ContainerIsolationError.notInitialized
+        }
+
+        // Stop container if it's still running
+        if let container = activeContainers[id] {
+            do {
+                try await stopContainer(container)
+            } catch {
+                // Log error but continue with deletion
+                print("Warning: Failed to stop container \(id): \(error)")
+            }
+        }
+
+        // Remove from active containers
+        activeContainers.removeValue(forKey: id)
+
+        // Clean up container resources via manager
+        try manager.delete(id)
     }
 
     /// Cleans up all containers and shuts down the service.
     func shutdown() async throws {
-        // TODO: Phase 3 implementation
-        // 1. Stop all active containers
-        // 2. Clean up resources
-        // 3. Shut down container manager
-        fatalError("Not yet implemented - Phase 3")
+        // Stop all active containers
+        for (id, container) in activeContainers {
+            do {
+                try await stopContainer(container)
+            } catch {
+                print("Warning: Failed to stop container \(id) during shutdown: \(error)")
+            }
+        }
+
+        // Clear active containers map
+        activeContainers.removeAll()
+
+        // Container manager will be deallocated naturally
+        containerManager = nil
+    }
+
+    // MARK: - Status & Monitoring
+
+    /// Returns the container for a given runner ID, if it exists.
+    ///
+    /// - Parameter id: The runner/container ID.
+    /// - Returns: The active container, or nil if not found.
+    func getContainer(id: String) -> LinuxContainer? {
+        return activeContainers[id]
+    }
+
+    /// Returns the number of active containers.
+    var activeContainerCount: Int {
+        return activeContainers.count
+    }
+
+    /// Returns whether the service is initialized.
+    var isInitialized: Bool {
+        return containerManager != nil
     }
 
     #else
@@ -129,6 +251,35 @@ class ContainerIsolationService {
         fatalError("Container isolation is only available on macOS 26+ with Containerization framework")
     }
     #endif
+}
+
+// MARK: - Errors
+
+/// Errors that can occur during container isolation operations.
+enum ContainerIsolationError: Error, LocalizedError {
+    case notInitialized
+    case kernelNotFound(URL)
+    case containerNotFound(String)
+    case creationFailed(String)
+    case startFailed(String)
+    case stopFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .notInitialized:
+            return "Container isolation service not initialized. Call initialize() first."
+        case .kernelNotFound(let path):
+            return "Linux kernel not found at path: \(path.path)"
+        case .containerNotFound(let id):
+            return "Container not found: \(id)"
+        case .creationFailed(let message):
+            return "Failed to create container: \(message)"
+        case .startFailed(let message):
+            return "Failed to start container: \(message)"
+        case .stopFailed(let message):
+            return "Failed to stop container: \(message)"
+        }
+    }
 }
 
 // MARK: - Configuration
