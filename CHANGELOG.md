@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/omniaura/mac-runner/compare/v1.2.0...v1.3.0) (2026-02-13)
+
+
+### Features
+
+* add dedicated user isolation for self-hosted runners ([#7](https://github.com/omniaura/mac-runner/issues/7)) ([ff65794](https://github.com/omniaura/mac-runner/commit/ff6579467343c415638da8cbb4f2264dd4922a74))
+
 # [1.2.0](https://github.com/omniaura/mac-runner/compare/v1.1.4...v1.2.0) (2026-02-10)
 
 
