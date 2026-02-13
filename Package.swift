@@ -4,7 +4,8 @@ import PackageDescription
 let package = Package(
     name: "MacRunner",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v13)  // Base platform support
+        // Note: Container isolation requires macOS 26+
     ],
     products: [
         .executable(
@@ -12,11 +13,15 @@ let package = Package(
             targets: ["MacRunner"]
         )
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/apple/containerization.git", from: "0.25.1")
+    ],
     targets: [
         .executableTarget(
             name: "MacRunner",
-            dependencies: [],
+            dependencies: [
+                .product(name: "Containerization", package: "containerization", condition: .when(platforms: [.macOS]))
+            ],
             path: "Sources"
         ),
         .testTarget(

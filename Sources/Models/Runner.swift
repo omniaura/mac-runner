@@ -9,6 +9,7 @@ struct Runner: Identifiable, Codable, Sendable {
     var status: RunnerStatus
     var githubRunnerId: Int?
     var busy: Bool  // Whether runner is currently executing a job
+    var isolationMode: IsolationMode?  // Per-runner isolation override (nil = use global setting)
 
     init(
         id: UUID = UUID(),
@@ -18,7 +19,8 @@ struct Runner: Identifiable, Codable, Sendable {
         enabled: Bool = true,
         status: RunnerStatus = .stopped,
         githubRunnerId: Int? = nil,
-        busy: Bool = false
+        busy: Bool = false,
+        isolationMode: IsolationMode? = nil
     ) {
         self.id = id
         self.name = name
@@ -28,6 +30,7 @@ struct Runner: Identifiable, Codable, Sendable {
         self.status = status
         self.githubRunnerId = githubRunnerId
         self.busy = busy
+        self.isolationMode = isolationMode
     }
 
     init(from decoder: Decoder) throws {
@@ -41,6 +44,19 @@ struct Runner: Identifiable, Codable, Sendable {
         githubRunnerId = try container.decodeIfPresent(Int.self, forKey: .githubRunnerId)
         // Default busy to false for backward compatibility
         busy = try container.decodeIfPresent(Bool.self, forKey: .busy) ?? false
+        // Per-runner isolation mode (added in v1.5.0)
+        isolationMode = try container.decodeIfPresent(IsolationMode.self, forKey: .isolationMode)
+    }
+
+    /// Returns the effective isolation mode for this runner.
+    ///
+    /// If the runner has a specific isolation mode set, that is returned.
+    /// Otherwise, falls back to the global app settings isolation mode.
+    ///
+    /// - Parameter globalMode: The global isolation mode from app settings.
+    /// - Returns: The isolation mode to use for this runner.
+    func effectiveIsolationMode(global globalMode: IsolationMode) -> IsolationMode {
+        return isolationMode ?? globalMode
     }
 }
 
@@ -82,6 +98,7 @@ struct RunnerConfig: Codable, Sendable {
 enum IsolationMode: Codable, Sendable, Equatable {
     case none
     case dedicatedUser(username: String)
+    case container  // Container isolation via Apple Containerization framework (macOS 26+)
 
     static let defaultUsername = "_macrunner"
 
@@ -97,6 +114,8 @@ enum IsolationMode: Codable, Sendable, Equatable {
         case .dedicatedUser(let username):
             try container.encode("dedicatedUser", forKey: .type)
             try container.encode(username, forKey: .username)
+        case .container:
+            try container.encode("container", forKey: .type)
         }
     }
 
@@ -107,8 +126,34 @@ enum IsolationMode: Codable, Sendable, Equatable {
         case "dedicatedUser":
             let username = try container.decode(String.self, forKey: .username)
             self = .dedicatedUser(username: username)
+        case "container":
+            self = .container
         default:
             self = .none
+        }
+    }
+
+    /// Returns a human-readable description of the isolation mode.
+    var displayName: String {
+        switch self {
+        case .none:
+            return "None"
+        case .dedicatedUser(let username):
+            return "User (\(username))"
+        case .container:
+            return "Container"
+        }
+    }
+
+    /// Returns an icon representing the isolation mode.
+    var icon: String {
+        switch self {
+        case .none:
+            return "🔓"
+        case .dedicatedUser:
+            return "👤"
+        case .container:
+            return "📦"
         }
     }
 }
