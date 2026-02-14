@@ -42,13 +42,18 @@ enum ProcessUtils {
         // Kill deepest children first
         for p in allPids.reversed() {
             if useSudo {
-                let kill = Process()
-                kill.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-                kill.arguments = ["-n", "kill", "-TERM", String(p)]
-                kill.standardOutput = FileHandle.nullDevice
-                kill.standardError = FileHandle.nullDevice
-                try? kill.run()
-                kill.waitUntilExit()
+                let killProc = Process()
+                killProc.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+                killProc.arguments = ["-n", "kill", "-TERM", String(p)]
+                killProc.standardOutput = FileHandle.nullDevice
+                killProc.standardError = FileHandle.nullDevice
+                do {
+                    try killProc.run()
+                } catch {
+                    // Log failure but continue with remaining processes
+                    print("Warning: Failed to kill process \(p): \(error)")
+                }
+                killProc.waitUntilExit()
             } else {
                 kill(p, SIGTERM)
             }
