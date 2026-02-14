@@ -2,6 +2,10 @@ import Foundation
 import Combine
 import ServiceManagement
 
+#if canImport(Containerization)
+import Containerization
+#endif
+
 @MainActor
 class RunnerManager: ObservableObject {
     @Published var runners: [Runner] = []
@@ -13,13 +17,16 @@ class RunnerManager: ObservableObject {
     private let isolationService = UserIsolationService.shared
     private let processManager = ProcessManager()
     private let pidManager = PIDFileManager()
+    private var containerService: ContainerIsolationService?
     private var runnerProcesses: [UUID: Process] = [:]
+    private var runnerContainers: [UUID: Any] = [:]  // [UUID: LinuxContainer] but untyped for compatibility
     private(set) var currentSettings: AppSettings = .default
     private var statusPollingTask: Task<Void, Never>?
     private var runnersToAutoRestart: Set<UUID> = []
 
     init() {
         loadConfiguration()
+        initializeContainerService()
 
         // Before reconciling, capture runners that were running but whose
         // processes are no longer alive — these need auto-restart after launch.
@@ -32,6 +39,42 @@ class RunnerManager: ObservableObject {
         reconcileRunnerStates()
         syncLoginItem()
         startStatusPolling()
+    }
+
+    /// Initialize container isolation service if available (macOS 26+)
+    private func initializeContainerService() {
+        #if canImport(Containerization)
+        if #available(macOS 26.0, *) {
+            // Setup paths for container service
+            let appSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first!
+            let macRunnerDir = appSupport.appendingPathComponent("MacRunner", isDirectory: true)
+
+            // Kernel path (will need to be provided/downloaded)
+            // For now, use a placeholder - this will be implemented in Phase 5
+            let kernelPath = macRunnerDir.appendingPathComponent("vmlinux")
+            let imageStorePath = macRunnerDir.appendingPathComponent("images")
+
+            let service = ContainerIsolationService(
+                kernelPath: kernelPath,
+                imageStorePath: imageStorePath
+            )
+
+            // Initialize asynchronously in the background
+            Task {
+                do {
+                    try await service.initialize()
+                    await MainActor.run {
+                        self.containerService = service
+                    }
+                } catch {
+                    print("Container isolation not available: \(error.localizedDescription)")
+                }
+            }
+        }
+        #endif
     }
 
     deinit {
@@ -206,16 +249,76 @@ class RunnerManager: ObservableObject {
 
         // Launch runner as a background process that survives the parent (CLI) exiting.
         let logFile = "\(runnerDir)/runner.log"
-        let process = try processManager.startProcess(
-            for: id,
-            executable: "\(runnerDir)/run.sh",
-            workingDirectory: runnerDir,
-            logFile: logFile,
-            isolation: isolation
-        )
 
-        // Store process reference for in-memory tracking (GUI)
-        runnerProcesses[id] = process
+        // Container isolation requires special handling
+        if case .container = isolation {
+            // Container-based isolation (macOS 26+)
+            #if canImport(Containerization)
+            if #available(macOS 26.0, *) {
+                guard let containerService = containerService else {
+                    throw RunnerError.containerServiceNotAvailable
+                }
+
+                // Get registration token for container configuration
+                let registrationToken = try await ghService.getRegistrationToken(for: runner.repo)
+
+                // Create container configuration
+                let containerConfig = ContainerRunnerConfiguration(
+                    containerImage: nil,  // Use default GitHub Actions runner image
+                    cpuCount: 2,
+                    memoryInBytes: 2 * 1024 * 1024 * 1024,  // 2 GiB
+                    diskSizeInBytes: 4 * 1024 * 1024 * 1024,  // 4 GiB
+                    enableNestedVirtualization: false,
+                    workspaceURL: URL(fileURLWithPath: runnerDir),
+                    repositoryURL: runner.repo,
+                    registrationToken: registrationToken
+                )
+
+                // Create and start container
+                let container = try await containerService.createRunnerContainer(
+                    id: id.uuidString,
+                    config: containerConfig
+                )
+                try await containerService.startContainer(container)
+
+                // Store container reference
+                runnerContainers[id] = container
+
+                // Monitor container in background
+                Task {
+                    do {
+                        #if canImport(Containerization)
+                        if let linuxContainer = container as? LinuxContainer {
+                            let exitCode = try await linuxContainer.wait()
+                            print("Container \(id.uuidString) exited with code: \(exitCode)")
+                        }
+                        #endif
+                        await MainActor.run {
+                            handleRunnerTermination(id)
+                        }
+                    } catch {
+                        print("Container monitoring error: \(error)")
+                    }
+                }
+            } else {
+                throw RunnerError.containerServiceNotAvailable
+            }
+            #else
+            throw RunnerError.containerServiceNotAvailable
+            #endif
+        } else {
+            // Standard process-based isolation (.none or .dedicatedUser)
+            let process = try processManager.startProcess(
+                for: id,
+                executable: "\(runnerDir)/run.sh",
+                workingDirectory: runnerDir,
+                logFile: logFile,
+                isolation: isolation
+            )
+
+            // Store process reference for in-memory tracking (GUI)
+            runnerProcesses[id] = process
+        }
 
         runners[index].status = .running
         saveConfiguration()
@@ -228,12 +331,34 @@ class RunnerManager: ObservableObject {
 
         let isolation = currentSettings.isolationMode
 
-        // Stop process and clean up PID file
-        let inMemoryProcess = runnerProcesses[id]
-        try processManager.stopProcess(for: id, isolation: isolation, inMemoryProcess: inMemoryProcess)
+        // Check if this is a container-based runner
+        if case .container = isolation {
+            #if canImport(Containerization)
+            if #available(macOS 26.0, *) {
+                if let container = runnerContainers[id] {
+                    guard let containerService = containerService else {
+                        throw RunnerError.containerServiceNotAvailable
+                    }
 
-        if inMemoryProcess != nil {
-            runnerProcesses.removeValue(forKey: id)
+                    // Stop and clean up container
+                    if let linuxContainer = container as? LinuxContainer {
+                        try await containerService.stopContainer(linuxContainer)
+                    }
+                    try await containerService.deleteContainer(id: id.uuidString)
+                    runnerContainers.removeValue(forKey: id)
+                } else {
+                    throw RunnerError.notRunning
+                }
+            }
+            #endif
+        } else {
+            // Standard process-based isolation - use ProcessManager
+            let inMemoryProcess = runnerProcesses[id]
+            try processManager.stopProcess(for: id, isolation: isolation, inMemoryProcess: inMemoryProcess)
+
+            if inMemoryProcess != nil {
+                runnerProcesses.removeValue(forKey: id)
+            }
         }
 
         runners[index].status = .stopped
@@ -367,6 +492,7 @@ enum RunnerError: LocalizedError {
     case notRunning
     case invalidRepo
     case startFailed
+    case containerServiceNotAvailable
 
     var errorDescription: String? {
         switch self {
@@ -375,6 +501,8 @@ enum RunnerError: LocalizedError {
         case .notRunning: return "Runner is not running"
         case .invalidRepo: return "Invalid repository or no access"
         case .startFailed: return "Failed to start runner process"
+        case .containerServiceNotAvailable:
+            return "Container isolation requires macOS 26.0+ and is not available on this system"
         }
     }
 }
