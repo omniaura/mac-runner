@@ -4,8 +4,7 @@ import PackageDescription
 let package = Package(
     name: "MacRunner",
     platforms: [
-        .macOS(.v13)  // Base platform support
-        // Note: Container isolation requires macOS 26+
+        .macOS(.v15)
     ],
     products: [
         .executable(

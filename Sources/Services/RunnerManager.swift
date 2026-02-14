@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import ServiceManagement
 
 @MainActor
 class RunnerManager: ObservableObject {
@@ -13,10 +14,21 @@ class RunnerManager: ObservableObject {
     private var runnerProcesses: [UUID: Process] = [:]
     private(set) var currentSettings: AppSettings = .default
     private var statusPollingTask: Task<Void, Never>?
+    private var runnersToAutoRestart: Set<UUID> = []
 
     init() {
         loadConfiguration()
+
+        // Before reconciling, capture runners that were running but whose
+        // processes are no longer alive — these need auto-restart after launch.
+        for runner in runners where runner.status == .running {
+            if !isRunnerProcessAlive(runner.id) {
+                runnersToAutoRestart.insert(runner.id)
+            }
+        }
+
         reconcileRunnerStates()
+        syncLoginItem()
         startStatusPolling()
     }
 
@@ -46,8 +58,50 @@ class RunnerManager: ObservableObject {
     }
 
     func updateSettings(_ settings: AppSettings) {
+        let loginChanged = settings.startOnLogin != currentSettings.startOnLogin
         currentSettings = settings
         saveConfiguration()
+        if loginChanged {
+            syncLoginItem()
+        }
+    }
+
+    // MARK: - Login Item
+
+    private func syncLoginItem() {
+        let service = SMAppService.mainApp
+        do {
+            if currentSettings.startOnLogin {
+                if service.status != .enabled {
+                    try service.register()
+                }
+            } else {
+                if service.status == .enabled {
+                    try service.unregister()
+                }
+            }
+        } catch {
+            self.error = "Failed to update login item: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Auto-Restart
+
+    func autoRestartRunners() async {
+        guard !runnersToAutoRestart.isEmpty else { return }
+        let ids = runnersToAutoRestart
+        runnersToAutoRestart.removeAll()
+
+        for id in ids {
+            do {
+                try await startRunner(id)
+            } catch {
+                if let index = runners.firstIndex(where: { $0.id == id }) {
+                    runners[index].status = .error
+                    saveConfiguration()
+                }
+            }
+        }
     }
 
     // MARK: - Runner Management

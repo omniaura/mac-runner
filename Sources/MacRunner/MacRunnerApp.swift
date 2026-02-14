@@ -46,6 +46,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: .openSettings,
             object: nil
         )
+
+        Task { await runnerManager.autoRestartRunners() }
     }
 
     @objc func togglePopover() {
