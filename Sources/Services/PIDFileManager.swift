@@ -77,7 +77,17 @@ class PIDFileManager {
     /// - Parameter pid: Process ID to check
     /// - Returns: true if process exists, false otherwise
     func isProcessAlive(_ pid: pid_t) -> Bool {
-        return kill(pid, 0) == 0 // signal 0 = just check if process exists
+        // signal 0 = just check if process exists
+        if kill(pid, 0) == 0 {
+            return true // Process exists and we have permission to signal it
+        }
+
+        // Check errno to distinguish between "not found" and "permission denied"
+        let error = errno
+        if error == EPERM {
+            return true // Process exists but owned by different user (e.g., dedicated-user isolation)
+        }
+        return false // ESRCH = process not found, or other error
     }
 
     /// Checks if a runner process is alive by reading its PID file

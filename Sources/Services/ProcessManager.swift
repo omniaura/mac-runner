@@ -42,8 +42,14 @@ class ProcessManager {
             proc.standardOutput = logHandle
             proc.standardError = logHandle
 
-            try proc.run()
-            process = proc
+            do {
+                try proc.run()
+                process = proc
+            } catch {
+                // Close log handle if process launch fails
+                try? logHandle.close()
+                throw error
+            }
 
         case .dedicatedUser(let username):
             // Create log file directory as service user
