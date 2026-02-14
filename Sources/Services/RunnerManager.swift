@@ -151,7 +151,7 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Runner Management
 
-    func addRunner(name: String, repo: String, labels: [String]) async throws {
+    func addRunner(name: String, repo: String, labels: [String], isolationMode: IsolationMode? = nil) async throws {
         isLoading = true
         defer { isLoading = false }
 
@@ -163,14 +163,18 @@ class RunnerManager: ObservableObject {
         // Get registration token from GitHub via gh CLI
         let registrationToken = try await ghService.getRegistrationToken(for: repo)
 
-        // Create runner
+        // Create runner with optional isolation mode override
         let runner = Runner(
             name: name,
             repo: repo,
             labels: labels,
             enabled: true,
-            status: .stopped
+            status: .stopped,
+            isolationMode: isolationMode
         )
+
+        // Use per-runner isolation mode if specified, otherwise use global setting
+        let effectiveIsolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
 
         // Download, configure, and install runner
         try await RunnerInstaller.shared.setupRunner(
@@ -179,7 +183,7 @@ class RunnerManager: ObservableObject {
             name: name,
             labels: labels,
             runnerId: runner.id,
-            isolation: currentSettings.isolationMode
+            isolation: effectiveIsolation
         )
 
         // Look up the GitHub-assigned runner ID so we can delete it later

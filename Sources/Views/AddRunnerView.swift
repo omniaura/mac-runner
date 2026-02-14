@@ -7,11 +7,30 @@ struct AddRunnerView: View {
     @State private var repo = ""
     @State private var name = ""
     @State private var labelsText = "macos, mac-runner"
+    @State private var selectedIsolation: IsolationSelection = .global
     @State private var repos: [String] = []
     @State private var isLoadingRepos = false
     @State private var showRepoPicker = false
     @State private var isAdding = false
     @State private var errorMessage: String?
+
+    enum IsolationSelection: String, CaseIterable, Identifiable {
+        case global = "Global (from settings)"
+        case none = "None (no isolation)"
+        case user = "User (dedicated user)"
+        case container = "Container (macOS 26+)"
+
+        var id: String { rawValue }
+
+        var isolationMode: IsolationMode? {
+            switch self {
+            case .global: return nil
+            case .none: return .none
+            case .user: return .dedicatedUser(username: IsolationMode.defaultUsername)
+            case .container: return .container
+            }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -112,6 +131,32 @@ struct AddRunnerView: View {
                             .textFieldStyle(.roundedBorder)
                     }
 
+                    // Isolation Mode
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Isolation Mode")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        Picker("Isolation Mode", selection: $selectedIsolation) {
+                            ForEach(IsolationSelection.allCases) { option in
+                                Text(option.rawValue).tag(option)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        // Warning for container isolation
+                        if selectedIsolation == .container {
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.orange)
+                                    .font(.caption)
+                                Text("Requires macOS 26.0+")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
                     if let error = errorMessage {
                         Text(error)
                             .foregroundColor(.red)
@@ -147,7 +192,7 @@ struct AddRunnerView: View {
             }
             .padding()
         }
-        .frame(width: 400, height: 400)
+        .frame(width: 400, height: 480)
     }
 
     private func loadRepos() async {
@@ -181,7 +226,8 @@ struct AddRunnerView: View {
             try await runnerManager.addRunner(
                 name: runnerName,
                 repo: repo,
-                labels: labels.isEmpty ? ["macos"] : labels
+                labels: labels.isEmpty ? ["macos"] : labels,
+                isolationMode: selectedIsolation.isolationMode
             )
             dismiss()
         } catch {
