@@ -18,6 +18,7 @@ class RunnerManager: ObservableObject {
     private let processManager = ProcessManager()
     private let pidManager = PIDFileManager()
     private var containerService: ContainerIsolationService?
+    private var containerServiceInitializationTask: Task<Void, Never>?
     private var runnerProcesses: [UUID: Process] = [:]
     private var runnerContainers: [UUID: Any] = [:]  // [UUID: LinuxContainer] but untyped for compatibility
     private(set) var currentSettings: AppSettings = .default
@@ -65,8 +66,8 @@ class RunnerManager: ObservableObject {
                 imageStorePath: imageStorePath
             )
 
-            // Initialize asynchronously in the background
-            Task {
+            // Initialize asynchronously in the background and track initialization state
+            containerServiceInitializationTask = Task {
                 do {
                     try await service.initialize()
                     await MainActor.run {
@@ -263,6 +264,11 @@ class RunnerManager: ObservableObject {
             // Container-based isolation (macOS 26+)
             #if canImport(Containerization)
             if #available(macOS 26.0, *) {
+                // Wait for container service initialization to complete if still in progress
+                if let initTask = containerServiceInitializationTask {
+                    _ = await initTask.value
+                }
+
                 guard let containerService = containerService else {
                     throw RunnerError.containerServiceNotAvailable
                 }
@@ -473,11 +479,12 @@ class RunnerManager: ObservableObject {
             newName = "\(originalRunner.name)-\(counter)"
         }
 
-        // Create duplicate with same settings
+        // Create duplicate with same settings, preserving isolation mode
         try await addRunner(
             name: newName,
             repo: originalRunner.repo,
-            labels: originalRunner.labels
+            labels: originalRunner.labels,
+            isolationMode: originalRunner.isolationMode
         )
     }
 
