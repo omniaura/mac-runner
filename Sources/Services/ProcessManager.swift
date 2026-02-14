@@ -112,21 +112,27 @@ class ProcessManager {
         isolation: IsolationMode,
         inMemoryProcess: Process? = nil
     ) throws {
-        // Try in-memory process first (GUI path)
+        // Get PID from in-memory process or PID file
+        let pid: pid_t?
         if let process = inMemoryProcess {
-            process.terminate()
-            process.waitUntilExit()
-        } else if let pid = pidManager.readPID(for: id) {
-            // Kill process tree based on isolation mode
-            switch isolation {
-            case .none, .container:
-                ProcessUtils.killProcessTree(pid, useSudo: false)
-            case .dedicatedUser:
-                ProcessUtils.killProcessTree(pid, useSudo: true)
-            }
+            pid = process.processIdentifier
         } else {
+            pid = pidManager.readPID(for: id)
+        }
+
+        guard let actualPid = pid else {
             throw RunnerError.notRunning
         }
+
+        // Kill process tree based on isolation mode
+        let useSudo: Bool
+        switch isolation {
+        case .none, .container:
+            useSudo = false
+        case .dedicatedUser:
+            useSudo = true
+        }
+        ProcessUtils.killProcessTree(actualPid, useSudo: useSudo)
 
         // Clean up PID file
         pidManager.removePID(for: id)
