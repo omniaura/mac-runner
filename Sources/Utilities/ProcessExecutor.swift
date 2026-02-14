@@ -35,13 +35,16 @@ enum ProcessExecutor {
         }
 
         try process.run()
-        process.waitUntilExit()
 
         let output: String
         if silent {
+            process.waitUntilExit()
             output = ""
         } else {
+            // Read pipe data BEFORE waiting to prevent deadlock on large outputs
+            // (pipe buffer is typically 64KB; processes block if buffer fills)
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
             output = String(data: data, encoding: .utf8) ?? ""
         }
 

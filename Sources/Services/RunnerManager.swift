@@ -46,10 +46,13 @@ class RunnerManager: ObservableObject {
         #if canImport(Containerization)
         if #available(macOS 26.0, *) {
             // Setup paths for container service
-            let appSupport = FileManager.default.urls(
+            guard let appSupport = FileManager.default.urls(
                 for: .applicationSupportDirectory,
                 in: .userDomainMask
-            ).first!
+            ).first else {
+                print("Container isolation not available: Could not find Application Support directory")
+                return
+            }
             let macRunnerDir = appSupport.appendingPathComponent("MacRunner", isDirectory: true)
 
             // Kernel path (will need to be provided/downloaded)
@@ -233,7 +236,8 @@ class RunnerManager: ObservableObject {
         }
 
         let runner = runners[index]
-        let isolation = currentSettings.isolationMode
+        // Use per-runner isolation mode if specified, otherwise use global setting
+        let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
 
         // Get runner directory
         let runnerDir = try RunnerDirectory.path(for: id, isolation: isolation)
@@ -333,7 +337,9 @@ class RunnerManager: ObservableObject {
             throw RunnerError.notFound
         }
 
-        let isolation = currentSettings.isolationMode
+        let runner = runners[index]
+        // Use per-runner isolation mode if specified, otherwise use global setting
+        let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
 
         // Check if this is a container-based runner
         if case .container = isolation {

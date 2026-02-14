@@ -153,9 +153,23 @@
    ```
 
 2. **Grant necessary permissions:**
+
+   ⚠️ **Security Note:** Only grant admin access if your workflows truly require `sudo` privileges. For most workflows, running as a standard user is sufficient and more secure.
+
+   For workflows requiring elevated privileges:
    ```bash
-   # Allow the dedicated user to run GitHub Actions runner
+   # Option 1: Add to admin group (grants full sudo access)
    sudo dseditgroup -o edit -a _macrunner -t user admin
+
+   # Option 2: Grant specific sudo commands via sudoers (recommended for production)
+   sudo visudo
+   # Add: _macrunner ALL=(ALL) NOPASSWD: /usr/bin/git, /usr/bin/npm
+   ```
+
+   For standard workflows (no sudo needed):
+   ```bash
+   # Option 3: Grant only file permissions to runner directories
+   sudo chown -R _macrunner:staff ~/Library/Application\ Support/MacRunner
    ```
 
 3. **Verify user exists:**
