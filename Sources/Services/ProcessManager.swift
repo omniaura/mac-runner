@@ -58,15 +58,39 @@ class ProcessManager {
                 owner: username
             )
 
-            // Launch process as dedicated user
-            let proc = try isolationService.launchAsUser(
-                username: username,
-                executable: executable,
-                currentDirectory: workingDirectory,
-                standardOutput: FileHandle.nullDevice,
-                standardError: FileHandle.nullDevice
-            )
-            process = proc
+            // Create log file and set ownership
+            FileManager.default.createFile(atPath: logFile, contents: nil)
+
+            // Set ownership via sudo chown
+            let chown = Process()
+            chown.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+            chown.arguments = ["-n", "chown", "\(username):staff", logFile]
+            chown.standardOutput = FileHandle.nullDevice
+            chown.standardError = FileHandle.nullDevice
+            try chown.run()
+            chown.waitUntilExit()
+
+            // Open log file for writing
+            guard let logHandle = FileHandle(forWritingAtPath: logFile) else {
+                throw RunnerError.startFailed
+            }
+            logHandle.seekToEndOfFile()
+
+            // Launch process as dedicated user with logging enabled
+            let proc: Process
+            do {
+                proc = try isolationService.launchAsUser(
+                    username: username,
+                    executable: executable,
+                    currentDirectory: workingDirectory,
+                    standardOutput: logHandle,
+                    standardError: logHandle
+                )
+                process = proc
+            } catch {
+                try? logHandle.close()
+                throw error
+            }
         }
 
         // Write PID file

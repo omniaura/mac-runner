@@ -206,13 +206,16 @@ class RunnerManager: ObservableObject {
 
         // Launch runner as a background process that survives the parent (CLI) exiting.
         let logFile = "\(runnerDir)/runner.log"
-        let _ = try processManager.startProcess(
+        let process = try processManager.startProcess(
             for: id,
             executable: "\(runnerDir)/run.sh",
             workingDirectory: runnerDir,
             logFile: logFile,
             isolation: isolation
         )
+
+        // Store process reference for in-memory tracking (GUI)
+        runnerProcesses[id] = process
 
         runners[index].status = .running
         saveConfiguration()
