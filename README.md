@@ -7,6 +7,7 @@ Simple Mac menu bar app and CLI for managing GitHub Actions self-hosted runners.
 - 🏃 Run multiple GitHub Actions runners on a single Mac
 - 🖥️ **Dual CLI + GUI** — manage runners from terminal or menu bar
 - 🔑 **`gh` CLI integration** — no manual PAT tokens, uses your existing `gh auth`
+- 🔒 **Hybrid isolation** — choose user isolation (macOS runners) or container isolation (Linux workflows)
 - ⏸️ Pause/Resume all runners with one click
 - 🎯 Perfect for when you need your Mac's resources for intensive work
 - 📊 Monitor runner status from menu bar
@@ -48,8 +49,9 @@ Or: right-click the app → Open → click "Open" in the dialog.
 
 ### Prerequisites
 
-- macOS 13+
+- macOS 13+ (macOS 15+ for user isolation, macOS 26+ for container isolation)
 - [`gh` CLI](https://cli.github.com/) installed and authenticated (`gh auth login`)
+- Apple Silicon Mac (for container isolation)
 
 ## Quick Start
 
@@ -143,14 +145,71 @@ The runner-fallback-action queries the GitHub REST API to check runner availabil
 - [`jimmygchen/runner-fallback-action`](https://github.com/jimmygchen/runner-fallback-action) — original (archived)
 - [GitHub Community: Auto-switch to GitHub runner if self-hosted unavailable](https://github.com/orgs/community/discussions/20019)
 
+## Isolation Modes
+
+Mac Runner supports three isolation modes to protect your development environment:
+
+### 1. No Isolation (Default)
+- Runners execute directly as your current user
+- Simple setup, works on any macOS version
+- ⚠️ **Not recommended for untrusted workflows** — CI jobs have full access to your files
+
+### 2. User Isolation (macOS 15+)
+- Each runner runs as a dedicated system user (e.g., `_macrunner`)
+- Prevents CI jobs from accessing your files, credentials, and desktop
+- Best for macOS-based workflows
+- **How to enable:**
+  ```bash
+  # CLI
+  mac-runner add owner/repo --isolation user
+
+  # GUI
+  Settings → Isolation Mode → Dedicated User
+  ```
+
+### 3. Container Isolation (macOS 26+, Apple Silicon)
+- Runs Linux workflows in isolated, lightweight virtual machines
+- Uses Apple's [Containerization framework](https://github.com/apple/containerization)
+- Sub-second startup times with Rosetta 2 for linux/amd64 emulation
+- Best for Linux-based workflows, Docker builds, cross-platform testing
+- **Requirements:** macOS 26+, Apple Silicon, Linux kernel 6.14.9+
+- **How to enable:**
+  ```bash
+  # CLI
+  mac-runner add owner/repo --isolation container
+
+  # GUI
+  Settings → Isolation Mode → Container
+  ```
+
+### Per-Runner Isolation Override
+
+You can set a global default isolation mode and override it per-runner:
+
+```bash
+# Set global default to user isolation
+mac-runner settings --isolation user
+
+# Add a Linux runner with container isolation
+mac-runner add owner/linux-project --isolation container
+
+# Add a macOS runner with no isolation (for trusted workflows)
+mac-runner add owner/trusted-project --isolation none
+```
+
+In the GUI, each runner displays its isolation mode with an icon:
+- 🔓 No isolation
+- 👤 User isolation
+- 📦 Container isolation
+
 ## Planned Features
 
-- [ ] Container isolation via [Apple Containers](https://developer.apple.com/documentation/virtualization) — run each runner in an isolated Linux container so CI jobs can't touch your desktop, mount DMGs, or interfere with your dev environment
 - [ ] Auto-provision CI tools (node, npm, gh) in runner environments
 - [ ] Automatic pause when battery low
 - [ ] Pause during specific hours
 - [ ] Resource usage monitoring
 - [ ] Notifications for job starts
+- [ ] Custom container images for containerized runners
 
 ## Architecture
 
