@@ -12,11 +12,15 @@ let package = Package(
             targets: ["MacRunner"]
         )
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/apple/containerization.git", from: "0.25.1")
+    ],
     targets: [
         .executableTarget(
             name: "MacRunner",
-            dependencies: [],
+            dependencies: [
+                .product(name: "Containerization", package: "containerization", condition: .when(platforms: [.macOS]))
+            ],
             path: "Sources"
         ),
         .testTarget(
