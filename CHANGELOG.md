@@ -1,3 +1,17 @@
+# [1.5.0](https://github.com/omniaura/mac-runner/compare/v1.4.0...v1.5.0) (2026-02-14)
+
+
+### Bug Fixes
+
+* resolve build errors from container isolation and Xcode 26 SDK ([#13](https://github.com/omniaura/mac-runner/issues/13)) ([1a7bc29](https://github.com/omniaura/mac-runner/commit/1a7bc291dd3913d3999c1a2c538520741fa46019))
+
+
+### Features
+
+* add container isolation infrastructure (Phase 1) ([4692fdf](https://github.com/omniaura/mac-runner/commit/4692fdfc0196c75c4f01c3b704403c4524fbc730)), closes [#9](https://github.com/omniaura/mac-runner/issues/9) [#9](https://github.com/omniaura/mac-runner/issues/9)
+* add launch on login and auto-restart runners ([#10](https://github.com/omniaura/mac-runner/issues/10)) ([99b4916](https://github.com/omniaura/mac-runner/commit/99b49169bef58daef974adbdf89e5318559a0d78))
+* implement Phase 3 container lifecycle service for hybrid isolation ([903849c](https://github.com/omniaura/mac-runner/commit/903849cf7779f45dc66d74ea2064d948386c54b7)), closes [#9](https://github.com/omniaura/mac-runner/issues/9) [#9](https://github.com/omniaura/mac-runner/issues/9)
+
 # [1.4.0](https://github.com/omniaura/mac-runner/compare/v1.3.0...v1.4.0) (2026-02-13)
 
 
