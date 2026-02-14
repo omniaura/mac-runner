@@ -50,7 +50,7 @@ enum SystemRequirements {
 
 // MARK: - OperatingSystemVersion Comparable
 
-extension OperatingSystemVersion: Comparable {
+extension OperatingSystemVersion: @retroactive Comparable {
     public static func < (lhs: OperatingSystemVersion, rhs: OperatingSystemVersion) -> Bool {
         if lhs.majorVersion != rhs.majorVersion {
             return lhs.majorVersion < rhs.majorVersion
@@ -59,5 +59,11 @@ extension OperatingSystemVersion: Comparable {
             return lhs.minorVersion < rhs.minorVersion
         }
         return lhs.patchVersion < rhs.patchVersion
+    }
+
+    public static func == (lhs: OperatingSystemVersion, rhs: OperatingSystemVersion) -> Bool {
+        return lhs.majorVersion == rhs.majorVersion &&
+               lhs.minorVersion == rhs.minorVersion &&
+               lhs.patchVersion == rhs.patchVersion
     }
 }
