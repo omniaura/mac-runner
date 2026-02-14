@@ -184,31 +184,7 @@ class UserIsolationService {
     }
 
     func killProcessTree(pid: pid_t, username: String) {
-        let descendants = findDescendants(of: pid) + [pid]
-        for p in descendants.reversed() {
-            let kill = Process()
-            kill.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-            kill.arguments = ["-n", "kill", "-TERM", String(p)]
-            kill.standardOutput = FileHandle.nullDevice
-            kill.standardError = FileHandle.nullDevice
-            try? kill.run()
-            kill.waitUntilExit()
-        }
-    }
-
-    private func findDescendants(of pid: pid_t) -> [pid_t] {
-        let pgrep = Process()
-        pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        pgrep.arguments = ["-P", String(pid)]
-        let pipe = Pipe()
-        pgrep.standardOutput = pipe
-        pgrep.standardError = FileHandle.nullDevice
-        try? pgrep.run()
-        pgrep.waitUntilExit()
-
-        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let children = output.split(separator: "\n").compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
-        return children + children.flatMap { findDescendants(of: $0) }
+        ProcessTreeUtility.killProcessTreeWithSudo(pid, username: username)
     }
 
     // MARK: - Sudoers
