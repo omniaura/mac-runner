@@ -331,32 +331,11 @@ class RunnerManager: ObservableObject {
         return pid
     }
 
-    /// Recursively find all descendant PIDs and kill the entire tree.
+    /// Kills the entire process tree for a runner process.
     /// The runner spawns run.sh → run-helper.sh → Runner.Listener,
     /// so we must walk the full tree, not just direct children.
     private func killProcessTree(_ pid: pid_t) {
-        let allPids = findDescendants(of: pid) + [pid]
-        // Kill deepest children first
-        for p in allPids.reversed() {
-            kill(p, SIGTERM)
-        }
-    }
-
-    private func findDescendants(of pid: pid_t) -> [pid_t] {
-        let pgrep = Process()
-        pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        pgrep.arguments = ["-P", String(pid)]
-        let pipe = Pipe()
-        pgrep.standardOutput = pipe
-        pgrep.standardError = FileHandle.nullDevice
-        try? pgrep.run()
-        pgrep.waitUntilExit()
-
-        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let children = output.split(separator: "\n").compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
-
-        // Recurse into each child
-        return children + children.flatMap { findDescendants(of: $0) }
+        ProcessUtils.killProcessTree(pid, useSudo: false)
     }
 
     private func isRunnerProcessAlive(_ id: UUID) -> Bool {
