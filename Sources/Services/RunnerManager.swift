@@ -208,7 +208,7 @@ class RunnerManager: ObservableObject {
         let pidFile = pidFilePath(for: id)
 
         switch isolation {
-        case .none:
+        case .none, .container:
             FileManager.default.createFile(atPath: logFile, contents: nil)
             guard let logHandle = FileHandle(forWritingAtPath: logFile) else {
                 throw RunnerError.startFailed
@@ -267,7 +267,7 @@ class RunnerManager: ObservableObject {
             runnerProcesses.removeValue(forKey: id)
         } else if let pid = readPID(for: id) {
             switch isolation {
-            case .none:
+            case .none, .container:
                 killProcessTree(pid)
             case .dedicatedUser(let username):
                 isolationService.killProcessTree(pid: pid, username: username)

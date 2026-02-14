@@ -80,8 +80,7 @@ class ContainerIsolationService {
         self.containerManager = try await ContainerManager(
             kernel: kernel,
             initfsReference: "ghcr.io/apple/containerization/vminit:0.13.0",
-            network: network,
-            imageStoreLocation: imageStorePath
+            network: network
         )
     }
 
@@ -97,7 +96,7 @@ class ContainerIsolationService {
         config: ContainerRunnerConfiguration
     ) async throws -> LinuxContainer {
         // Ensure container manager is initialized
-        guard let manager = containerManager else {
+        guard var manager = containerManager else {
             throw ContainerIsolationError.notInitialized
         }
 
@@ -116,10 +115,9 @@ class ContainerIsolationService {
 
             // Mount runner workspace into container
             containerConfig.mounts.append(
-                Mount(
+                .share(
                     source: config.workspaceURL.path,
-                    destination: "/runner/_work",
-                    type: "virtiofs"
+                    destination: "/runner/_work"
                 )
             )
 
@@ -145,9 +143,7 @@ class ContainerIsolationService {
             containerConfig.process.workingDirectory = "/runner"
 
             // Set environment variables
-            containerConfig.process.environment = [
-                "RUNNER_ALLOW_RUNASROOT": "1"
-            ]
+            containerConfig.process.environmentVariables.append("RUNNER_ALLOW_RUNASROOT=1")
 
             // Enable nested virtualization if requested
             if config.enableNestedVirtualization {
@@ -155,6 +151,9 @@ class ContainerIsolationService {
                 // containerConfig.enableNestedVirtualization = true
             }
         }
+
+        // Store mutated manager back
+        self.containerManager = manager
 
         // Store in active containers map
         activeContainers[id] = container
@@ -186,7 +185,7 @@ class ContainerIsolationService {
     /// - Parameter id: The container ID to delete.
     /// - Throws: If cleanup fails.
     func deleteContainer(id: String) async throws {
-        guard let manager = containerManager else {
+        guard var manager = containerManager else {
             throw ContainerIsolationError.notInitialized
         }
 
@@ -205,6 +204,7 @@ class ContainerIsolationService {
 
         // Clean up container resources via manager
         try manager.delete(id)
+        self.containerManager = manager
     }
 
     /// Cleans up all containers and shuts down the service.

@@ -44,7 +44,7 @@ class RunnerDirectory {
     static func path(for runnerId: UUID, isolation: IsolationMode = .none) throws -> String {
         let baseDir: URL
         switch isolation {
-        case .none:
+        case .none, .container:
             baseDir = FileManager.default.homeDirectoryForCurrentUser
         case .dedicatedUser(let username):
             baseDir = URL(fileURLWithPath: "/Users/\(username)")
@@ -56,7 +56,7 @@ class RunnerDirectory {
             .appendingPathComponent(runnerId.uuidString, isDirectory: true)
 
         switch isolation {
-        case .none:
+        case .none, .container:
             try FileManager.default.createDirectory(
                 at: runnerDir,
                 withIntermediateDirectories: true
