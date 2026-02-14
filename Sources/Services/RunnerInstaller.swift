@@ -71,7 +71,7 @@ class RunnerInstaller {
         let pipe = Pipe()
 
         switch isolation {
-        case .none:
+        case .none, .container:
             process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/bash")
             process.arguments = ["-c", configCommand]

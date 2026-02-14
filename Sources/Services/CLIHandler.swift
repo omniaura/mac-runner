@@ -250,6 +250,8 @@ enum CLIHandler {
             print("  Isolation: disabled")
         case .dedicatedUser(let username):
             print("  Isolation: enabled (user: \(username))")
+        case .container:
+            print("  Isolation: container (macOS 26+)")
         }
     }
 
