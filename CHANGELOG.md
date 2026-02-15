@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/omniaura/mac-runner/compare/v1.5.0...v1.6.0) (2026-02-15)
+
+
+### Features
+
+* Add hybrid isolation strategy with Apple container support ([#12](https://github.com/omniaura/mac-runner/issues/12)) ([7c00591](https://github.com/omniaura/mac-runner/commit/7c0059155b800b600daca058f7bffc9df50022db)), closes [#9](https://github.com/omniaura/mac-runner/issues/9) [#9](https://github.com/omniaura/mac-runner/issues/9) [#9](https://github.com/omniaura/mac-runner/issues/9)
+
 # [1.5.0](https://github.com/omniaura/mac-runner/compare/v1.4.0...v1.5.0) (2026-02-14)
 
 
