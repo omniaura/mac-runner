@@ -17,8 +17,18 @@ class RunnerManager: ObservableObject {
     private let isolationService = UserIsolationService.shared
     private let processManager = ProcessManager()
     private let pidManager = PIDFileManager()
-    private var containerService: ContainerIsolationService?
+    #if canImport(Containerization)
+    private var _containerService: Any?  // ContainerIsolationService, but untyped for availability
+    #endif
     private var containerServiceInitializationTask: Task<Void, Never>?
+
+    #if canImport(Containerization)
+    @available(macOS 26, *)
+    private var containerService: ContainerIsolationService? {
+        get { _containerService as? ContainerIsolationService }
+        set { _containerService = newValue }
+    }
+    #endif
     private var runnerProcesses: [UUID: Process] = [:]
     private var runnerContainers: [UUID: Any] = [:]  // [UUID: LinuxContainer] but untyped for compatibility
     private(set) var currentSettings: AppSettings = .default
