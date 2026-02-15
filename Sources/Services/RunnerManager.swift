@@ -35,6 +35,11 @@ class RunnerManager: ObservableObject {
     private var statusPollingTask: Task<Void, Never>?
     private var runnersToAutoRestart: Set<UUID> = []
 
+    /// Initialize the RunnerManager and restore runtime state.
+    ///
+    /// Loads configuration, initializes container isolation service if available (macOS 26+),
+    /// identifies runners that need auto-restart, reconciles process states, synchronizes
+    /// login item registration, and starts status polling.
     init() {
         loadConfiguration()
         initializeContainerService()
@@ -97,6 +102,10 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Configuration
 
+    /// Load runner configuration and settings from disk.
+    ///
+    /// Reads the saved configuration file and populates the runners array and settings.
+    /// If loading fails, sets the error property with details.
     func loadConfiguration() {
         do {
             let config = try configService.loadConfig()
@@ -107,6 +116,10 @@ class RunnerManager: ObservableObject {
         }
     }
 
+    /// Save current runner configuration and settings to disk.
+    ///
+    /// Persists the runners array and settings to the configuration file.
+    /// If saving fails, sets the error property with details.
     func saveConfiguration() {
         do {
             let config = RunnerConfig(runners: runners, settings: currentSettings)
@@ -116,6 +129,12 @@ class RunnerManager: ObservableObject {
         }
     }
 
+    /// Update application settings and synchronize system state.
+    ///
+    /// Updates settings and persists them to disk. If the "start on login" setting changed,
+    /// also updates the macOS login item registration.
+    ///
+    /// - Parameter settings: New application settings to apply
     func updateSettings(_ settings: AppSettings) {
         let loginChanged = settings.startOnLogin != currentSettings.startOnLogin
         currentSettings = settings
@@ -127,6 +146,9 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Login Item
 
+    /// Synchronize the macOS login item registration with current settings.
+    ///
+    /// Registers or unregisters the app as a login item based on the startOnLogin setting.
     private func syncLoginItem() {
         let service = SMAppService.mainApp
         do {
@@ -146,6 +168,11 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Auto-Restart
 
+    /// Automatically restart runners that were running before app launch.
+    ///
+    /// Called after initialization to restart runners that were marked as running
+    /// but whose processes are no longer alive (e.g., after app restart or crash).
+    /// Only restarts runners that were in the auto-restart set.
     func autoRestartRunners() async {
         guard !runnersToAutoRestart.isEmpty else { return }
         let ids = runnersToAutoRestart
@@ -165,6 +192,17 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Runner Management
 
+    /// Add a new GitHub Actions runner to the configuration.
+    ///
+    /// Downloads and configures a new GitHub Actions runner, then adds it to the runners list.
+    /// The runner can optionally specify an isolation mode override, otherwise uses the global setting.
+    ///
+    /// - Parameters:
+    ///   - name: Unique name for the runner
+    ///   - repo: GitHub repository in "owner/repo" format
+    ///   - labels: Labels to assign to the runner for workflow targeting
+    ///   - isolationMode: Optional isolation mode override (nil uses global setting)
+    /// - Throws: RunnerError if validation or setup fails
     func addRunner(name: String, repo: String, labels: [String], isolationMode: IsolationMode? = nil) async throws {
         isLoading = true
         defer { isLoading = false }
@@ -215,6 +253,13 @@ class RunnerManager: ObservableObject {
         try await startRunner(registeredRunner.id)
     }
 
+    /// Remove a runner from the configuration and GitHub.
+    ///
+    /// Stops the runner if currently running, removes it from GitHub's runner list,
+    /// cleans up local files, and removes it from the configuration.
+    ///
+    /// - Parameter id: UUID of the runner to remove
+    /// - Throws: RunnerError if removal fails
     func removeRunner(_ id: UUID) async throws {
         // Stop runner if it's running (in-memory or via PID file)
         if let index = runners.firstIndex(where: { $0.id == id }), runners[index].status == .running {
@@ -236,6 +281,14 @@ class RunnerManager: ObservableObject {
         saveConfiguration()
     }
 
+    /// Start a runner and begin accepting GitHub Actions workflow jobs.
+    ///
+    /// Launches the runner using the appropriate isolation mode (none, dedicated user, or container).
+    /// For container isolation, creates and starts a Linux container. For process-based isolation,
+    /// launches the runner as a background process. Updates the runner's status to running.
+    ///
+    /// - Parameter id: UUID of the runner to start
+    /// - Throws: RunnerError if the runner is not found, already running, or if startup fails
     func startRunner(_ id: UUID) async throws {
         guard let index = runners.firstIndex(where: { $0.id == id }) else {
             throw RunnerError.notFound
@@ -348,6 +401,14 @@ class RunnerManager: ObservableObject {
         saveConfiguration()
     }
 
+    /// Stop a running runner and terminate all its processes.
+    ///
+    /// For container-based runners, stops and deletes the container. For process-based runners,
+    /// terminates the process tree using the appropriate method for the isolation mode.
+    /// Updates the runner's status to stopped.
+    ///
+    /// - Parameter id: UUID of the runner to stop
+    /// - Throws: RunnerError if the runner is not found, not running, or if stopping fails
     func stopRunner(_ id: UUID) async throws {
         guard let index = runners.firstIndex(where: { $0.id == id }) else {
             throw RunnerError.notFound
@@ -391,6 +452,12 @@ class RunnerManager: ObservableObject {
         saveConfiguration()
     }
 
+    /// Pause all currently running runners.
+    ///
+    /// Stops all runners that are currently running and marks them as paused instead of stopped.
+    /// Paused runners can be resumed later with `resumeAll()`.
+    ///
+    /// - Throws: RunnerError if stopping any runner fails
     func pauseAll() async throws {
         for runner in runners where runner.status == .running {
             try await stopRunner(runner.id)
@@ -401,6 +468,11 @@ class RunnerManager: ObservableObject {
         saveConfiguration()
     }
 
+    /// Resume all paused runners.
+    ///
+    /// Starts all runners that were previously paused with `pauseAll()`.
+    ///
+    /// - Throws: RunnerError if starting any runner fails
     func resumeAll() async throws {
         for runner in runners where runner.status == .paused {
             try await startRunner(runner.id)
@@ -409,6 +481,10 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Lookup
 
+    /// Find a runner by name.
+    ///
+    /// - Parameter name: The name of the runner to find
+    /// - Returns: The runner with the given name, or nil if not found
     func runner(named name: String) -> Runner? {
         runners.first(where: { $0.name == name })
     }
@@ -440,6 +516,10 @@ class RunnerManager: ObservableObject {
         }
     }
 
+    /// Update runner busy/idle status by querying the GitHub API.
+    ///
+    /// Groups runners by repository to minimize API calls, then updates the isBusy flag
+    /// for each running runner based on whether it's currently executing a workflow.
     private func updateRunnerStatuses() async {
         // Group runners by repo to minimize API calls
         let runnersByRepo = Dictionary(grouping: runners) { $0.repo }
@@ -500,6 +580,11 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Private Helpers
 
+    /// Handle cleanup when a runner process terminates unexpectedly.
+    ///
+    /// Removes process references, cleans up PID files, and updates the runner status to stopped.
+    ///
+    /// - Parameter id: UUID of the terminated runner
     private func handleRunnerTermination(_ id: UUID) {
         runnerProcesses.removeValue(forKey: id)
         pidManager.removePID(for: id)
