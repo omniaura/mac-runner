@@ -58,18 +58,10 @@ class UserIsolationService {
         ]
 
         for (description, args) in commands {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-            process.arguments = args
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-            try process.run()
-            process.waitUntilExit()
-
-            guard process.terminationStatus == 0 else {
-                let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                throw IsolationError.userCreationFailed("\(description) failed: \(output)")
+            do {
+                try ProcessExecutor.runSudoOrThrow(arguments: args, errorMessage: description)
+            } catch {
+                throw IsolationError.userCreationFailed("\(description) failed: \(error.localizedDescription)")
             }
         }
     }
@@ -107,19 +99,10 @@ class UserIsolationService {
         let runnersPath = "\(homePath)/.mac-runner/runners"
 
         // Create home and runners directory
-        let mkdir = Process()
-        mkdir.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-        mkdir.arguments = ["mkdir", "-p", runnersPath]
-        let mkdirPipe = Pipe()
-        mkdir.standardOutput = mkdirPipe
-        mkdir.standardError = mkdirPipe
-        try mkdir.run()
-        mkdir.waitUntilExit()
-
-        guard mkdir.terminationStatus == 0 else {
-            let output = String(data: mkdirPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            throw IsolationError.homeSetupFailed("mkdir failed: \(output)")
-        }
+        try ProcessExecutor.runSudoOrThrow(
+            arguments: ["mkdir", "-p", runnersPath],
+            errorMessage: "Failed to create home directory"
+        )
 
         // Write .zprofile with Homebrew PATH
         let zprofileContent = """
@@ -142,13 +125,10 @@ class UserIsolationService {
         tee.waitUntilExit()
 
         // chown the entire home to the service user
-        let chown = Process()
-        chown.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-        chown.arguments = ["chown", "-R", "\(username):staff", homePath]
-        chown.standardOutput = FileHandle.nullDevice
-        chown.standardError = FileHandle.nullDevice
-        try chown.run()
-        chown.waitUntilExit()
+        _ = try ProcessExecutor.runSudo(
+            arguments: ["chown", "-R", "\(username):staff", homePath],
+            silent: true
+        )
     }
 
     // MARK: - Process Management

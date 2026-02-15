@@ -171,6 +171,23 @@ struct RunnerRow: View {
                     .foregroundColor(.secondary)
 
                 HStack(spacing: 4) {
+                    // Isolation mode indicator
+                    if let mode = runner.isolationMode {
+                        Text("\(mode.icon) \(mode.displayName)")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.purple.opacity(0.2))
+                            .cornerRadius(4)
+                    } else {
+                        Text("🌐 Global")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.gray.opacity(0.2))
+                            .cornerRadius(4)
+                    }
+
                     ForEach(runner.labels, id: \.self) { label in
                         Text(label)
                             .font(.caption2)

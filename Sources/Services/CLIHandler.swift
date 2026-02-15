@@ -64,8 +64,9 @@ enum CLIHandler {
           version           Show version
 
         ADD OPTIONS:
-          --name <name>     Runner name (default: auto-generated)
-          --labels <l1,l2>  Comma-separated labels (default: macos)
+          --name <name>        Runner name (default: auto-generated)
+          --labels <l1,l2>     Comma-separated labels (default: macos)
+          --isolation <mode>   Isolation mode: none|user|container (default: global)
 
         SETUP OPTIONS:
           --teardown        Remove isolation (delete user, sudoers, reset config)
@@ -73,6 +74,8 @@ enum CLIHandler {
         EXAMPLES:
           mac-runner auth
           mac-runner add owner/repo --name my-runner --labels macos,arm64
+          mac-runner add owner/repo --isolation container
+          mac-runner add owner/repo --isolation user
           mac-runner list
           mac-runner start my-runner
           mac-runner stop my-runner
@@ -102,13 +105,16 @@ enum CLIHandler {
         let nameW = max(runners.map(\.name.count).max() ?? 4, 4)
         let repoW = max(runners.map(\.repo.count).max() ?? 4, 4)
 
-        let header = "  \("NAME".padding(toLength: nameW, withPad: " ", startingAt: 0))  \("REPO".padding(toLength: repoW, withPad: " ", startingAt: 0))  STATUS      LABELS"
+        let header = "  \("NAME".padding(toLength: nameW, withPad: " ", startingAt: 0))  \("REPO".padding(toLength: repoW, withPad: " ", startingAt: 0))  STATUS      ISOLATION    LABELS"
         print(header)
 
         for runner in runners {
             let status = "\(runner.status.icon) \(runner.status.rawValue)"
+            let isolation = runner.isolationMode?.icon ?? "🌐"
+            let isolationName = runner.isolationMode?.displayName ?? "Global"
+            let isolationText = "\(isolation) \(isolationName)"
             let labels = runner.labels.joined(separator: ",")
-            let line = "  \(runner.name.padding(toLength: nameW, withPad: " ", startingAt: 0))  \(runner.repo.padding(toLength: repoW, withPad: " ", startingAt: 0))  \(status.padding(toLength: 10, withPad: " ", startingAt: 0))  \(labels)"
+            let line = "  \(runner.name.padding(toLength: nameW, withPad: " ", startingAt: 0))  \(runner.repo.padding(toLength: repoW, withPad: " ", startingAt: 0))  \(status.padding(toLength: 10, withPad: " ", startingAt: 0))  \(isolationText.padding(toLength: 12, withPad: " ", startingAt: 0))  \(labels)"
             print(line)
         }
     }
@@ -117,12 +123,13 @@ enum CLIHandler {
     private static func handleAdd(args: [String]) async {
         guard let repo = args.first, repo.contains("/") else {
             print("Error: repository required in owner/repo format")
-            print("Usage: mac-runner add <owner/repo> [--name <name>] [--labels <l1,l2>]")
+            print("Usage: mac-runner add <owner/repo> [--name <name>] [--labels <l1,l2>] [--isolation <mode>]")
             return
         }
 
         var name = "mac-runner-\(ProcessInfo.processInfo.hostName.prefix(8))-\(Int.random(in: 1000...9999))"
         var labels = ["macos", "mac-runner"]
+        var isolationMode: IsolationMode? = nil
 
         // Parse optional flags
         var i = 1
@@ -133,6 +140,20 @@ enum CLIHandler {
                 i += 2
             case "--labels" where i + 1 < args.count:
                 labels = args[i + 1].split(separator: ",").map(String.init)
+                i += 2
+            case "--isolation" where i + 1 < args.count:
+                let mode = args[i + 1].lowercased()
+                switch mode {
+                case "none":
+                    isolationMode = .none
+                case "user":
+                    isolationMode = .dedicatedUser(username: IsolationMode.defaultUsername)
+                case "container":
+                    isolationMode = .container
+                default:
+                    print("Error: invalid isolation mode '\(mode)'. Valid options: none, user, container")
+                    return
+                }
                 i += 2
             default:
                 i += 1
@@ -149,8 +170,12 @@ enum CLIHandler {
         print("Adding runner '\(name)' for \(repo)...")
         let manager = RunnerManager()
         do {
-            try await manager.addRunner(name: name, repo: repo, labels: labels)
-            print("Runner '\(name)' added and started successfully!")
+            try await manager.addRunner(name: name, repo: repo, labels: labels, isolationMode: isolationMode)
+            if let mode = isolationMode {
+                print("Runner '\(name)' added with \(mode.displayName) isolation and started successfully!")
+            } else {
+                print("Runner '\(name)' added (using global isolation mode) and started successfully!")
+            }
         } catch {
             print("Error: \(error.localizedDescription)")
         }
@@ -247,11 +272,11 @@ enum CLIHandler {
 
         switch manager.currentSettings.isolationMode {
         case .none:
-            print("  Isolation: disabled")
+            print("  Global isolation: disabled")
         case .dedicatedUser(let username):
-            print("  Isolation: enabled (user: \(username))")
+            print("  Global isolation: user (\(username))")
         case .container:
-            print("  Isolation: container (macOS 26+)")
+            print("  Global isolation: container")
         }
     }
 

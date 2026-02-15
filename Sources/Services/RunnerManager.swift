@@ -2,6 +2,10 @@ import Foundation
 import Combine
 import ServiceManagement
 
+#if canImport(Containerization)
+import Containerization
+#endif
+
 @MainActor
 class RunnerManager: ObservableObject {
     @Published var runners: [Runner] = []
@@ -13,13 +17,32 @@ class RunnerManager: ObservableObject {
     private let isolationService = UserIsolationService.shared
     private let processManager = ProcessManager()
     private let pidManager = PIDFileManager()
+    #if canImport(Containerization)
+    private var _containerService: Any?  // ContainerIsolationService, but untyped for availability
+    #endif
+    private var containerServiceInitializationTask: Task<Void, Never>?
+
+    #if canImport(Containerization)
+    @available(macOS 26, *)
+    private var containerService: ContainerIsolationService? {
+        get { _containerService as? ContainerIsolationService }
+        set { _containerService = newValue }
+    }
+    #endif
     private var runnerProcesses: [UUID: Process] = [:]
+    private var runnerContainers: [UUID: Any] = [:]  // [UUID: LinuxContainer] but untyped for compatibility
     private(set) var currentSettings: AppSettings = .default
     private var statusPollingTask: Task<Void, Never>?
     private var runnersToAutoRestart: Set<UUID> = []
 
+    /// Initialize the RunnerManager and restore runtime state.
+    ///
+    /// Loads configuration, initializes container isolation service if available (macOS 26+),
+    /// identifies runners that need auto-restart, reconciles process states, synchronizes
+    /// login item registration, and starts status polling.
     init() {
         loadConfiguration()
+        initializeContainerService()
 
         // Before reconciling, capture runners that were running but whose
         // processes are no longer alive — these need auto-restart after launch.
@@ -34,12 +57,55 @@ class RunnerManager: ObservableObject {
         startStatusPolling()
     }
 
+    /// Initialize container isolation service if available (macOS 26+)
+    private func initializeContainerService() {
+        #if canImport(Containerization)
+        if #available(macOS 26.0, *) {
+            // Setup paths for container service
+            guard let appSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first else {
+                print("Container isolation not available: Could not find Application Support directory")
+                return
+            }
+            let macRunnerDir = appSupport.appendingPathComponent("MacRunner", isDirectory: true)
+
+            // Kernel path (will need to be provided/downloaded)
+            // For now, use a placeholder - this will be implemented in Phase 5
+            let kernelPath = macRunnerDir.appendingPathComponent("vmlinux")
+            let imageStorePath = macRunnerDir.appendingPathComponent("images")
+
+            let service = ContainerIsolationService(
+                kernelPath: kernelPath,
+                imageStorePath: imageStorePath
+            )
+
+            // Initialize asynchronously in the background and track initialization state
+            containerServiceInitializationTask = Task {
+                do {
+                    try await service.initialize()
+                    await MainActor.run {
+                        self.containerService = service
+                    }
+                } catch {
+                    print("Container isolation not available: \(error.localizedDescription)")
+                }
+            }
+        }
+        #endif
+    }
+
     deinit {
         statusPollingTask?.cancel()
     }
 
     // MARK: - Configuration
 
+    /// Load runner configuration and settings from disk.
+    ///
+    /// Reads the saved configuration file and populates the runners array and settings.
+    /// If loading fails, sets the error property with details.
     func loadConfiguration() {
         do {
             let config = try configService.loadConfig()
@@ -50,6 +116,10 @@ class RunnerManager: ObservableObject {
         }
     }
 
+    /// Save current runner configuration and settings to disk.
+    ///
+    /// Persists the runners array and settings to the configuration file.
+    /// If saving fails, sets the error property with details.
     func saveConfiguration() {
         do {
             let config = RunnerConfig(runners: runners, settings: currentSettings)
@@ -59,6 +129,12 @@ class RunnerManager: ObservableObject {
         }
     }
 
+    /// Update application settings and synchronize system state.
+    ///
+    /// Updates settings and persists them to disk. If the "start on login" setting changed,
+    /// also updates the macOS login item registration.
+    ///
+    /// - Parameter settings: New application settings to apply
     func updateSettings(_ settings: AppSettings) {
         let loginChanged = settings.startOnLogin != currentSettings.startOnLogin
         currentSettings = settings
@@ -70,6 +146,9 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Login Item
 
+    /// Synchronize the macOS login item registration with current settings.
+    ///
+    /// Registers or unregisters the app as a login item based on the startOnLogin setting.
     private func syncLoginItem() {
         let service = SMAppService.mainApp
         do {
@@ -89,6 +168,11 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Auto-Restart
 
+    /// Automatically restart runners that were running before app launch.
+    ///
+    /// Called after initialization to restart runners that were marked as running
+    /// but whose processes are no longer alive (e.g., after app restart or crash).
+    /// Only restarts runners that were in the auto-restart set.
     func autoRestartRunners() async {
         guard !runnersToAutoRestart.isEmpty else { return }
         let ids = runnersToAutoRestart
@@ -108,7 +192,18 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Runner Management
 
-    func addRunner(name: String, repo: String, labels: [String]) async throws {
+    /// Add a new GitHub Actions runner to the configuration.
+    ///
+    /// Downloads and configures a new GitHub Actions runner, then adds it to the runners list.
+    /// The runner can optionally specify an isolation mode override, otherwise uses the global setting.
+    ///
+    /// - Parameters:
+    ///   - name: Unique name for the runner
+    ///   - repo: GitHub repository in "owner/repo" format
+    ///   - labels: Labels to assign to the runner for workflow targeting
+    ///   - isolationMode: Optional isolation mode override (nil uses global setting)
+    /// - Throws: RunnerError if validation or setup fails
+    func addRunner(name: String, repo: String, labels: [String], isolationMode: IsolationMode? = nil) async throws {
         isLoading = true
         defer { isLoading = false }
 
@@ -120,14 +215,18 @@ class RunnerManager: ObservableObject {
         // Get registration token from GitHub via gh CLI
         let registrationToken = try await ghService.getRegistrationToken(for: repo)
 
-        // Create runner
+        // Create runner with optional isolation mode override
         let runner = Runner(
             name: name,
             repo: repo,
             labels: labels,
             enabled: true,
-            status: .stopped
+            status: .stopped,
+            isolationMode: isolationMode
         )
+
+        // Use per-runner isolation mode if specified, otherwise use global setting
+        let effectiveIsolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
 
         // Download, configure, and install runner
         try await RunnerInstaller.shared.setupRunner(
@@ -136,7 +235,7 @@ class RunnerManager: ObservableObject {
             name: name,
             labels: labels,
             runnerId: runner.id,
-            isolation: currentSettings.isolationMode
+            isolation: effectiveIsolation
         )
 
         // Look up the GitHub-assigned runner ID so we can delete it later
@@ -154,6 +253,13 @@ class RunnerManager: ObservableObject {
         try await startRunner(registeredRunner.id)
     }
 
+    /// Remove a runner from the configuration and GitHub.
+    ///
+    /// Stops the runner if currently running, removes it from GitHub's runner list,
+    /// cleans up local files, and removes it from the configuration.
+    ///
+    /// - Parameter id: UUID of the runner to remove
+    /// - Throws: RunnerError if removal fails
     func removeRunner(_ id: UUID) async throws {
         // Stop runner if it's running (in-memory or via PID file)
         if let index = runners.firstIndex(where: { $0.id == id }), runners[index].status == .running {
@@ -175,6 +281,14 @@ class RunnerManager: ObservableObject {
         saveConfiguration()
     }
 
+    /// Start a runner and begin accepting GitHub Actions workflow jobs.
+    ///
+    /// Launches the runner using the appropriate isolation mode (none, dedicated user, or container).
+    /// For container isolation, creates and starts a Linux container. For process-based isolation,
+    /// launches the runner as a background process. Updates the runner's status to running.
+    ///
+    /// - Parameter id: UUID of the runner to start
+    /// - Throws: RunnerError if the runner is not found, already running, or if startup fails
     func startRunner(_ id: UUID) async throws {
         guard let index = runners.firstIndex(where: { $0.id == id }) else {
             throw RunnerError.notFound
@@ -186,7 +300,8 @@ class RunnerManager: ObservableObject {
         }
 
         let runner = runners[index]
-        let isolation = currentSettings.isolationMode
+        // Use per-runner isolation mode if specified, otherwise use global setting
+        let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
 
         // Get runner directory
         let runnerDir = try RunnerDirectory.path(for: id, isolation: isolation)
@@ -206,40 +321,143 @@ class RunnerManager: ObservableObject {
 
         // Launch runner as a background process that survives the parent (CLI) exiting.
         let logFile = "\(runnerDir)/runner.log"
-        let process = try processManager.startProcess(
-            for: id,
-            executable: "\(runnerDir)/run.sh",
-            workingDirectory: runnerDir,
-            logFile: logFile,
-            isolation: isolation
-        )
 
-        // Store process reference for in-memory tracking (GUI)
-        runnerProcesses[id] = process
+        // Container isolation requires special handling
+        if case .container = isolation {
+            // Container-based isolation (macOS 26+)
+            #if canImport(Containerization)
+            if #available(macOS 26.0, *) {
+                // Wait for container service initialization to complete if still in progress
+                if let initTask = containerServiceInitializationTask {
+                    _ = await initTask.value
+                }
+
+                guard let containerService = containerService else {
+                    throw RunnerError.containerServiceNotAvailable
+                }
+
+                // Get registration token for container configuration
+                let registrationToken = try await ghService.getRegistrationToken(for: runner.repo)
+
+                // Create container configuration
+                let containerConfig = ContainerRunnerConfiguration(
+                    containerImage: nil,  // Use default GitHub Actions runner image
+                    cpuCount: 2,
+                    memoryInBytes: 2 * 1024 * 1024 * 1024,  // 2 GiB
+                    diskSizeInBytes: 4 * 1024 * 1024 * 1024,  // 4 GiB
+                    enableNestedVirtualization: false,
+                    workspaceURL: URL(fileURLWithPath: runnerDir),
+                    repositoryURL: runner.repo,
+                    registrationToken: registrationToken
+                )
+
+                // Create and start container
+                let container = try await containerService.createRunnerContainer(
+                    id: id.uuidString,
+                    config: containerConfig
+                )
+                try await containerService.startContainer(container)
+
+                // Store container reference
+                runnerContainers[id] = container
+
+                // Monitor container in background
+                Task {
+                    do {
+                        #if canImport(Containerization)
+                        if let linuxContainer = container as? LinuxContainer {
+                            let exitCode = try await linuxContainer.wait()
+                            print("Container \(id.uuidString) exited with code: \(exitCode)")
+                        }
+                        #endif
+                        await MainActor.run {
+                            handleRunnerTermination(id)
+                        }
+                    } catch {
+                        print("Container monitoring error: \(error)")
+                    }
+                }
+            } else {
+                throw RunnerError.containerServiceNotAvailable
+            }
+            #else
+            throw RunnerError.containerServiceNotAvailable
+            #endif
+        } else {
+            // Standard process-based isolation (.none or .dedicatedUser)
+            let process = try processManager.startProcess(
+                for: id,
+                executable: "\(runnerDir)/run.sh",
+                workingDirectory: runnerDir,
+                logFile: logFile,
+                isolation: isolation
+            )
+
+            // Store process reference for in-memory tracking (GUI)
+            runnerProcesses[id] = process
+        }
 
         runners[index].status = .running
         saveConfiguration()
     }
 
+    /// Stop a running runner and terminate all its processes.
+    ///
+    /// For container-based runners, stops and deletes the container. For process-based runners,
+    /// terminates the process tree using the appropriate method for the isolation mode.
+    /// Updates the runner's status to stopped.
+    ///
+    /// - Parameter id: UUID of the runner to stop
+    /// - Throws: RunnerError if the runner is not found, not running, or if stopping fails
     func stopRunner(_ id: UUID) async throws {
         guard let index = runners.firstIndex(where: { $0.id == id }) else {
             throw RunnerError.notFound
         }
 
-        let isolation = currentSettings.isolationMode
+        let runner = runners[index]
+        // Use per-runner isolation mode if specified, otherwise use global setting
+        let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
 
-        // Stop process and clean up PID file
-        let inMemoryProcess = runnerProcesses[id]
-        try processManager.stopProcess(for: id, isolation: isolation, inMemoryProcess: inMemoryProcess)
+        // Check if this is a container-based runner
+        if case .container = isolation {
+            #if canImport(Containerization)
+            if #available(macOS 26.0, *) {
+                if let container = runnerContainers[id] {
+                    guard let containerService = containerService else {
+                        throw RunnerError.containerServiceNotAvailable
+                    }
 
-        if inMemoryProcess != nil {
-            runnerProcesses.removeValue(forKey: id)
+                    // Stop and clean up container
+                    if let linuxContainer = container as? LinuxContainer {
+                        try await containerService.stopContainer(linuxContainer)
+                    }
+                    try await containerService.deleteContainer(id: id.uuidString)
+                    runnerContainers.removeValue(forKey: id)
+                } else {
+                    throw RunnerError.notRunning
+                }
+            }
+            #endif
+        } else {
+            // Standard process-based isolation - use ProcessManager
+            let inMemoryProcess = runnerProcesses[id]
+            try processManager.stopProcess(for: id, isolation: isolation, inMemoryProcess: inMemoryProcess)
+
+            if inMemoryProcess != nil {
+                runnerProcesses.removeValue(forKey: id)
+            }
         }
 
         runners[index].status = .stopped
         saveConfiguration()
     }
 
+    /// Pause all currently running runners.
+    ///
+    /// Stops all runners that are currently running and marks them as paused instead of stopped.
+    /// Paused runners can be resumed later with `resumeAll()`.
+    ///
+    /// - Throws: RunnerError if stopping any runner fails
     func pauseAll() async throws {
         for runner in runners where runner.status == .running {
             try await stopRunner(runner.id)
@@ -250,6 +468,11 @@ class RunnerManager: ObservableObject {
         saveConfiguration()
     }
 
+    /// Resume all paused runners.
+    ///
+    /// Starts all runners that were previously paused with `pauseAll()`.
+    ///
+    /// - Throws: RunnerError if starting any runner fails
     func resumeAll() async throws {
         for runner in runners where runner.status == .paused {
             try await startRunner(runner.id)
@@ -258,6 +481,10 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Lookup
 
+    /// Find a runner by name.
+    ///
+    /// - Parameter name: The name of the runner to find
+    /// - Returns: The runner with the given name, or nil if not found
     func runner(named name: String) -> Runner? {
         runners.first(where: { $0.name == name })
     }
@@ -289,6 +516,10 @@ class RunnerManager: ObservableObject {
         }
     }
 
+    /// Update runner busy/idle status by querying the GitHub API.
+    ///
+    /// Groups runners by repository to minimize API calls, then updates the isBusy flag
+    /// for each running runner based on whether it's currently executing a workflow.
     private func updateRunnerStatuses() async {
         // Group runners by repo to minimize API calls
         let runnersByRepo = Dictionary(grouping: runners) { $0.repo }
@@ -338,16 +569,22 @@ class RunnerManager: ObservableObject {
             newName = "\(originalRunner.name)-\(counter)"
         }
 
-        // Create duplicate with same settings
+        // Create duplicate with same settings, preserving isolation mode
         try await addRunner(
             name: newName,
             repo: originalRunner.repo,
-            labels: originalRunner.labels
+            labels: originalRunner.labels,
+            isolationMode: originalRunner.isolationMode
         )
     }
 
     // MARK: - Private Helpers
 
+    /// Handle cleanup when a runner process terminates unexpectedly.
+    ///
+    /// Removes process references, cleans up PID files, and updates the runner status to stopped.
+    ///
+    /// - Parameter id: UUID of the terminated runner
     private func handleRunnerTermination(_ id: UUID) {
         runnerProcesses.removeValue(forKey: id)
         pidManager.removePID(for: id)
@@ -367,6 +604,7 @@ enum RunnerError: LocalizedError {
     case notRunning
     case invalidRepo
     case startFailed
+    case containerServiceNotAvailable
 
     var errorDescription: String? {
         switch self {
@@ -375,6 +613,8 @@ enum RunnerError: LocalizedError {
         case .notRunning: return "Runner is not running"
         case .invalidRepo: return "Invalid repository or no access"
         case .startFailed: return "Failed to start runner process"
+        case .containerServiceNotAvailable:
+            return "Container isolation requires macOS 26.0+ and is not available on this system"
         }
     }
 }
