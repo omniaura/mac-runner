@@ -101,20 +101,27 @@ enum CLIHandler {
             return
         }
 
+        let globalMode = manager.currentSettings.isolationMode
+
+        // Pre-compute isolation text for column sizing
+        let isolationTexts = runners.map { runner -> String in
+            let effective = runner.effectiveIsolationMode(global: globalMode)
+            let isInherited = runner.isolationMode == nil
+            return "\(effective.icon) \(effective.displayName)\(isInherited ? " (global)" : "")"
+        }
+
         // Table header
         let nameW = max(runners.map(\.name.count).max() ?? 4, 4)
         let repoW = max(runners.map(\.repo.count).max() ?? 4, 4)
+        let isoW = max(isolationTexts.map(\.count).max() ?? 9, 9)
 
-        let header = "  \("NAME".padding(toLength: nameW, withPad: " ", startingAt: 0))  \("REPO".padding(toLength: repoW, withPad: " ", startingAt: 0))  STATUS      ISOLATION    LABELS"
+        let header = "  \("NAME".padding(toLength: nameW, withPad: " ", startingAt: 0))  \("REPO".padding(toLength: repoW, withPad: " ", startingAt: 0))  STATUS      \("ISOLATION".padding(toLength: isoW, withPad: " ", startingAt: 0))  LABELS"
         print(header)
 
-        for runner in runners {
+        for (runner, isolationText) in zip(runners, isolationTexts) {
             let status = "\(runner.status.icon) \(runner.status.rawValue)"
-            let isolation = runner.isolationMode?.icon ?? "🌐"
-            let isolationName = runner.isolationMode?.displayName ?? "Global"
-            let isolationText = "\(isolation) \(isolationName)"
             let labels = runner.labels.joined(separator: ",")
-            let line = "  \(runner.name.padding(toLength: nameW, withPad: " ", startingAt: 0))  \(runner.repo.padding(toLength: repoW, withPad: " ", startingAt: 0))  \(status.padding(toLength: 10, withPad: " ", startingAt: 0))  \(isolationText.padding(toLength: 12, withPad: " ", startingAt: 0))  \(labels)"
+            let line = "  \(runner.name.padding(toLength: nameW, withPad: " ", startingAt: 0))  \(runner.repo.padding(toLength: repoW, withPad: " ", startingAt: 0))  \(status.padding(toLength: 10, withPad: " ", startingAt: 0))  \(isolationText.padding(toLength: isoW, withPad: " ", startingAt: 0))  \(labels)"
             print(line)
         }
     }
