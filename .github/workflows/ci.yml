@@ -35,13 +35,13 @@ jobs:
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '16.0'  # Pinned to avoid SPM unsafe build flags in 26.x (see issue #18)
+          xcode-version: latest-stable
 
       - name: Resolve dependencies
         run: swift package resolve
 
       - name: Build
-        run: swift build
+        run: swift build -Xswiftc -suppress-warnings
 
       - name: Test
-        run: swift test
+        run: swift test -Xswiftc -suppress-warnings
