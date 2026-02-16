@@ -1,3 +1,10 @@
+## [1.6.1](https://github.com/omniaura/mac-runner/compare/v1.6.0...v1.6.1) (2026-02-16)
+
+
+### Bug Fixes
+
+* show effective isolation mode in CLI list output ([#25](https://github.com/omniaura/mac-runner/issues/25)) ([8c4c786](https://github.com/omniaura/mac-runner/commit/8c4c786803ac0bb3ad63e6625a072f476dfc0f31))
+
 # [1.6.0](https://github.com/omniaura/mac-runner/compare/v1.5.0...v1.6.0) (2026-02-15)
 
 
