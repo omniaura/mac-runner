@@ -41,7 +41,7 @@ jobs:
         run: swift package resolve
 
       - name: Build
-        run: swift build -Xswiftc -suppress-warnings
+        run: swift build --disable-sandbox
 
       - name: Test
-        run: swift test -Xswiftc -suppress-warnings
+        run: swift test --disable-sandbox
