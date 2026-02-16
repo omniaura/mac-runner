@@ -100,10 +100,10 @@ jobs:
       - name: Build universal binary
         run: |
           echo "Building for arm64..."
-          swift build -c release --arch arm64
+          swift build -c release --arch arm64 --disable-sandbox
 
           echo "Building for x86_64..."
-          swift build -c release --arch x86_64
+          swift build -c release --arch x86_64 --disable-sandbox
 
           echo "Creating universal binary..."
           mkdir -p .build/universal
