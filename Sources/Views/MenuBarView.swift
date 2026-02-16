@@ -188,6 +188,23 @@ struct RunnerRow: View {
                             .cornerRadius(4)
                     }
 
+                    // GUI access indicator
+                    if runner.enableGUI {
+                        Text("🖥️ GUI")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.2))
+                            .cornerRadius(4)
+                    } else {
+                        Text("⚫ Headless")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.gray.opacity(0.2))
+                            .cornerRadius(4)
+                    }
+
                     ForEach(runner.labels, id: \.self) { label in
                         Text(label)
                             .font(.caption2)

@@ -8,6 +8,7 @@ struct AddRunnerView: View {
     @State private var name = ""
     @State private var labelsText = "macos, mac-runner"
     @State private var selectedIsolation: IsolationSelection = .global
+    @State private var enableGUI = false
     @State private var repos: [String] = []
     @State private var isLoadingRepos = false
     @State private var showRepoPicker = false
@@ -157,6 +158,19 @@ struct AddRunnerView: View {
                         }
                     }
 
+                    // GUI Access
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle(isOn: $enableGUI) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Enable GUI Access")
+                                    .font(.subheadline)
+                                Text("Allow runner to access display (default: headless)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
                     if let error = errorMessage {
                         Text(error)
                             .foregroundColor(.red)
@@ -227,7 +241,8 @@ struct AddRunnerView: View {
                 name: runnerName,
                 repo: repo,
                 labels: labels.isEmpty ? ["macos"] : labels,
-                isolationMode: selectedIsolation.isolationMode
+                isolationMode: selectedIsolation.isolationMode,
+                enableGUI: enableGUI
             )
             dismiss()
         } catch {

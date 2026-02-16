@@ -10,6 +10,7 @@ struct Runner: Identifiable, Codable, Sendable {
     var githubRunnerId: Int?
     var busy: Bool  // Whether runner is currently executing a job
     var isolationMode: IsolationMode?  // Per-runner isolation override (nil = use global setting)
+    var enableGUI: Bool  // Whether to enable GUI access for this runner (default: false, headless)
 
     init(
         id: UUID = UUID(),
@@ -20,7 +21,8 @@ struct Runner: Identifiable, Codable, Sendable {
         status: RunnerStatus = .stopped,
         githubRunnerId: Int? = nil,
         busy: Bool = false,
-        isolationMode: IsolationMode? = nil
+        isolationMode: IsolationMode? = nil,
+        enableGUI: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -31,6 +33,7 @@ struct Runner: Identifiable, Codable, Sendable {
         self.githubRunnerId = githubRunnerId
         self.busy = busy
         self.isolationMode = isolationMode
+        self.enableGUI = enableGUI
     }
 
     init(from decoder: Decoder) throws {
@@ -46,6 +49,8 @@ struct Runner: Identifiable, Codable, Sendable {
         busy = try container.decodeIfPresent(Bool.self, forKey: .busy) ?? false
         // Per-runner isolation mode (added in v1.5.0)
         isolationMode = try container.decodeIfPresent(IsolationMode.self, forKey: .isolationMode)
+        // Default GUI access to false (headless) for backward compatibility
+        enableGUI = try container.decodeIfPresent(Bool.self, forKey: .enableGUI) ?? false
     }
 
     /// Returns the effective isolation mode for this runner.

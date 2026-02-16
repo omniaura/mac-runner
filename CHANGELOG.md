@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Features
+
+* **headless mode:** runners now default to headless (no GUI access) for better isolation and performance
+  - Add `--enable-gui` CLI flag to opt-in to GUI access when needed (visual tests, Xcode UI tests)
+  - GUI toggle in Add Runner dialog
+  - GUI access status displayed in CLI `list` and menu bar
+  - Headless mode removes DISPLAY and GUI-related environment variables
+
 ## [1.6.1](https://github.com/omniaura/mac-runner/compare/v1.6.0...v1.6.1) (2026-02-16)
 
 

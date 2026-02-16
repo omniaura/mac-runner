@@ -15,6 +15,7 @@ class ProcessManager {
     ///   - workingDirectory: Working directory for the process
     ///   - logFile: Path to log file for stdout/stderr
     ///   - isolation: Isolation mode to use
+    ///   - enableGUI: Whether to enable GUI access (default: false, headless)
     /// - Returns: The launched Process object
     /// - Throws: Error if process launch or PID write fails
     func startProcess(
@@ -22,7 +23,8 @@ class ProcessManager {
         executable: String,
         workingDirectory: String,
         logFile: String,
-        isolation: IsolationMode
+        isolation: IsolationMode,
+        enableGUI: Bool = false
     ) throws -> Process {
         let process: Process
 
@@ -41,6 +43,20 @@ class ProcessManager {
             proc.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
             proc.standardOutput = logHandle
             proc.standardError = logHandle
+
+            // Configure environment for headless mode (remove GUI access)
+            if !enableGUI {
+                var env = ProcessInfo.processInfo.environment
+                // Remove GUI-related environment variables
+                env.removeValue(forKey: "DISPLAY")
+                env.removeValue(forKey: "WAYLAND_DISPLAY")
+                env.removeValue(forKey: "XDG_SESSION_TYPE")
+                env.removeValue(forKey: "XDG_RUNTIME_DIR")
+                // Explicitly mark as headless
+                env["CI"] = "true"
+                env["HEADLESS"] = "true"
+                proc.environment = env
+            }
 
             do {
                 try proc.run()
@@ -84,7 +100,8 @@ class ProcessManager {
                     executable: executable,
                     currentDirectory: workingDirectory,
                     standardOutput: logHandle,
-                    standardError: logHandle
+                    standardError: logHandle,
+                    enableGUI: enableGUI
                 )
                 process = proc
             } catch {
