@@ -118,10 +118,10 @@ enum CLIHandler {
         let header = "  \("NAME".padding(toLength: nameW, withPad: " ", startingAt: 0))  \("REPO".padding(toLength: repoW, withPad: " ", startingAt: 0))  STATUS      \("ISOLATION".padding(toLength: isoW, withPad: " ", startingAt: 0))  LABELS"
         print(header)
 
-        for (i, runner) in runners.enumerated() {
+        for (runner, isolationText) in zip(runners, isolationTexts) {
             let status = "\(runner.status.icon) \(runner.status.rawValue)"
             let labels = runner.labels.joined(separator: ",")
-            let line = "  \(runner.name.padding(toLength: nameW, withPad: " ", startingAt: 0))  \(runner.repo.padding(toLength: repoW, withPad: " ", startingAt: 0))  \(status.padding(toLength: 10, withPad: " ", startingAt: 0))  \(isolationTexts[i].padding(toLength: isoW, withPad: " ", startingAt: 0))  \(labels)"
+            let line = "  \(runner.name.padding(toLength: nameW, withPad: " ", startingAt: 0))  \(runner.repo.padding(toLength: repoW, withPad: " ", startingAt: 0))  \(status.padding(toLength: 10, withPad: " ", startingAt: 0))  \(isolationText.padding(toLength: isoW, withPad: " ", startingAt: 0))  \(labels)"
             print(line)
         }
     }
