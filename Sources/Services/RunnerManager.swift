@@ -202,8 +202,9 @@ class RunnerManager: ObservableObject {
     ///   - repo: GitHub repository in "owner/repo" format
     ///   - labels: Labels to assign to the runner for workflow targeting
     ///   - isolationMode: Optional isolation mode override (nil uses global setting)
+    ///   - enableGUI: Whether to enable GUI access for this runner (default: false, headless)
     /// - Throws: RunnerError if validation or setup fails
-    func addRunner(name: String, repo: String, labels: [String], isolationMode: IsolationMode? = nil) async throws {
+    func addRunner(name: String, repo: String, labels: [String], isolationMode: IsolationMode? = nil, enableGUI: Bool = false) async throws {
         isLoading = true
         defer { isLoading = false }
 
@@ -215,14 +216,15 @@ class RunnerManager: ObservableObject {
         // Get registration token from GitHub via gh CLI
         let registrationToken = try await ghService.getRegistrationToken(for: repo)
 
-        // Create runner with optional isolation mode override
+        // Create runner with optional isolation mode override and GUI access setting
         let runner = Runner(
             name: name,
             repo: repo,
             labels: labels,
             enabled: true,
             status: .stopped,
-            isolationMode: isolationMode
+            isolationMode: isolationMode,
+            enableGUI: enableGUI
         )
 
         // Use per-runner isolation mode if specified, otherwise use global setting
@@ -390,7 +392,8 @@ class RunnerManager: ObservableObject {
                 executable: "\(runnerDir)/run.sh",
                 workingDirectory: runnerDir,
                 logFile: logFile,
-                isolation: isolation
+                isolation: isolation,
+                enableGUI: runner.enableGUI
             )
 
             // Store process reference for in-memory tracking (GUI)
@@ -569,12 +572,13 @@ class RunnerManager: ObservableObject {
             newName = "\(originalRunner.name)-\(counter)"
         }
 
-        // Create duplicate with same settings, preserving isolation mode
+        // Create duplicate with same settings, preserving isolation mode and GUI access
         try await addRunner(
             name: newName,
             repo: originalRunner.repo,
             labels: originalRunner.labels,
-            isolationMode: originalRunner.isolationMode
+            isolationMode: originalRunner.isolationMode,
+            enableGUI: originalRunner.enableGUI
         )
     }
 

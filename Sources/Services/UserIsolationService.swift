@@ -138,7 +138,8 @@ class UserIsolationService {
         executable: String,
         currentDirectory: String,
         standardOutput: Any? = nil,
-        standardError: Any? = nil
+        standardError: Any? = nil,
+        enableGUI: Bool = false
     ) throws -> Process {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
@@ -146,10 +147,18 @@ class UserIsolationService {
         // Use -n (non-interactive) and bash -l to source .zprofile for PATH
         let escapedDir = currentDirectory.replacingOccurrences(of: "'", with: "'\\''")
         let escapedExec = executable.replacingOccurrences(of: "'", with: "'\\''")
+
+        // Build command with headless environment if GUI is disabled
+        var command = "cd '\(escapedDir)' && '\(escapedExec)'"
+        if !enableGUI {
+            // Prepend environment variables to remove GUI access
+            command = "env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE -u XDG_RUNTIME_DIR CI=true HEADLESS=true " + command
+        }
+
         process.arguments = [
             "-n", "-u", username,
             "/bin/bash", "-l", "-c",
-            "cd '\(escapedDir)' && '\(escapedExec)'"
+            command
         ]
 
         if let stdout = standardOutput {

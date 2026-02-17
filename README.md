@@ -8,6 +8,7 @@ Simple Mac menu bar app and CLI for managing GitHub Actions self-hosted runners.
 - 🖥️ **Dual CLI + GUI** — manage runners from terminal or menu bar
 - 🔑 **`gh` CLI integration** — no manual PAT tokens, uses your existing `gh auth`
 - 🔒 **Hybrid isolation** — choose user isolation (macOS runners) or container isolation (Linux workflows)
+- 🎭 **Headless by default** — runners run without GUI access (enable when needed for visual testing)
 - ⏸️ Pause/Resume all runners with one click
 - 🎯 Perfect for when you need your Mac's resources for intensive work
 - 📊 Monitor runner status from menu bar
@@ -70,6 +71,9 @@ mac-runner auth
 
 # Add a runner (downloads, configures, starts in background)
 mac-runner add owner/repo --name my-runner --labels macos,mac-runner
+
+# Add a runner with GUI access (for visual tests, Xcode UI tests, etc.)
+mac-runner add owner/repo --enable-gui
 
 # List runners
 mac-runner list
@@ -201,6 +205,27 @@ In the GUI, each runner displays its isolation mode with an icon:
 - 🔓 No isolation
 - 👤 User isolation
 - 📦 Container isolation
+
+## GUI Access
+
+By default, runners operate in **headless mode** — they run without access to the GUI (display, windows, etc.). This is optimal for most CI jobs and prevents interference with your desktop.
+
+**When to enable GUI access:**
+- Visual testing (screenshot comparisons, E2E tests with browsers)
+- Xcode UI tests
+- iOS Simulator tests
+- macOS app GUI automation
+
+**How to enable:**
+```bash
+# CLI
+mac-runner add owner/repo --enable-gui
+
+# GUI
+Add Runner → Enable GUI Access (toggle)
+```
+
+**Note:** GUI sessions are currently shared across runners. For full isolation (separate GUI session per runner), see [Issue #27](https://github.com/omniaura/mac-runner/issues/27).
 
 ## Planned Features
 

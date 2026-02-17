@@ -71,6 +71,7 @@ enum CLIHandler {
           --name <name>        Runner name (default: auto-generated)
           --labels <l1,l2>     Comma-separated labels (default: macos)
           --isolation <mode>   Isolation mode: none|user|container (default: global)
+          --enable-gui         Enable GUI access (default: headless)
 
         SETUP OPTIONS:
           --teardown        Remove isolation (delete user, sudoers, reset config)
@@ -80,6 +81,7 @@ enum CLIHandler {
           mac-runner add owner/repo --name my-runner --labels macos,arm64
           mac-runner add owner/repo --isolation container
           mac-runner add owner/repo --isolation user
+          mac-runner add owner/repo --enable-gui
           mac-runner list
           mac-runner start my-runner
           mac-runner stop my-runner
@@ -119,13 +121,14 @@ enum CLIHandler {
         let repoW = max(runners.map(\.repo.count).max() ?? 4, 4)
         let isoW = max(isolationTexts.map(\.count).max() ?? 9, 9)
 
-        let header = "  \("NAME".padding(toLength: nameW, withPad: " ", startingAt: 0))  \("REPO".padding(toLength: repoW, withPad: " ", startingAt: 0))  STATUS      \("ISOLATION".padding(toLength: isoW, withPad: " ", startingAt: 0))  LABELS"
+        let header = "  \("NAME".padding(toLength: nameW, withPad: " ", startingAt: 0))  \("REPO".padding(toLength: repoW, withPad: " ", startingAt: 0))  STATUS      \("ISOLATION".padding(toLength: isoW, withPad: " ", startingAt: 0))  GUI       LABELS"
         print(header)
 
         for (runner, isolationText) in zip(runners, isolationTexts) {
             let status = "\(runner.status.icon) \(runner.status.rawValue)"
             let labels = runner.labels.joined(separator: ",")
-            let line = "  \(runner.name.padding(toLength: nameW, withPad: " ", startingAt: 0))  \(runner.repo.padding(toLength: repoW, withPad: " ", startingAt: 0))  \(status.padding(toLength: 10, withPad: " ", startingAt: 0))  \(isolationText.padding(toLength: isoW, withPad: " ", startingAt: 0))  \(labels)"
+            let guiStatus = runner.enableGUI ? "enabled " : "headless"
+            let line = "  \(runner.name.padding(toLength: nameW, withPad: " ", startingAt: 0))  \(runner.repo.padding(toLength: repoW, withPad: " ", startingAt: 0))  \(status.padding(toLength: 10, withPad: " ", startingAt: 0))  \(isolationText.padding(toLength: isoW, withPad: " ", startingAt: 0))  \(guiStatus)  \(labels)"
             print(line)
         }
     }
@@ -134,13 +137,14 @@ enum CLIHandler {
     private static func handleAdd(args: [String]) async {
         guard let repo = args.first, repo.contains("/") else {
             print("Error: repository required in owner/repo format")
-            print("Usage: mac-runner add <owner/repo> [--name <name>] [--labels <l1,l2>] [--isolation <mode>]")
+            print("Usage: mac-runner add <owner/repo> [--name <name>] [--labels <l1,l2>] [--isolation <mode>] [--enable-gui]")
             return
         }
 
         var name = "mac-runner-\(ProcessInfo.processInfo.hostName.prefix(8))-\(Int.random(in: 1000...9999))"
         var labels = ["macos", "mac-runner"]
         var isolationMode: IsolationMode? = nil
+        var enableGUI = false
 
         // Parse optional flags
         var i = 1
@@ -166,6 +170,9 @@ enum CLIHandler {
                     return
                 }
                 i += 2
+            case "--enable-gui":
+                enableGUI = true
+                i += 1
             default:
                 i += 1
             }
@@ -181,12 +188,16 @@ enum CLIHandler {
         print("Adding runner '\(name)' for \(repo)...")
         let manager = RunnerManager()
         do {
-            try await manager.addRunner(name: name, repo: repo, labels: labels, isolationMode: isolationMode)
+            try await manager.addRunner(name: name, repo: repo, labels: labels, isolationMode: isolationMode, enableGUI: enableGUI)
+            var message = "Runner '\(name)' added"
             if let mode = isolationMode {
-                print("Runner '\(name)' added with \(mode.displayName) isolation and started successfully!")
+                message += " with \(mode.displayName) isolation"
             } else {
-                print("Runner '\(name)' added (using global isolation mode) and started successfully!")
+                message += " (using global isolation mode)"
             }
+            message += enableGUI ? " with GUI access" : " (headless)"
+            message += " and started successfully!"
+            print(message)
         } catch {
             print("Error: \(error.localizedDescription)")
         }
