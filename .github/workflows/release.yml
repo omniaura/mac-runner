@@ -99,11 +99,15 @@ jobs:
 
       - name: Build universal binary
         run: |
+          # Using --disable-sandbox because Apple's Containerization framework
+          # requires write access during compilation, which the default SPM sandbox blocks.
+          # This is a standard workaround for Swift projects using native dependencies.
+          # Security note: Only affects build-time isolation, not runtime security.
           echo "Building for arm64..."
-          swift build -c release --arch arm64
+          swift build -c release --arch arm64 --disable-sandbox
 
           echo "Building for x86_64..."
-          swift build -c release --arch x86_64
+          swift build -c release --arch x86_64 --disable-sandbox
 
           echo "Creating universal binary..."
           mkdir -p .build/universal

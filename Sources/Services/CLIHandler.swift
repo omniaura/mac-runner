@@ -1,7 +1,11 @@
 import Foundation
 
 enum CLIHandler {
-    static let version = "1.1.0"
+    static var version: String {
+        // Read version from app bundle Info.plist (set during build)
+        // Fallback to "dev" if not found (for local development)
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    }
 
     @MainActor
     static func handle(arguments: [String]) async -> Bool {
