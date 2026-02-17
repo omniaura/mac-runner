@@ -1,3 +1,11 @@
+## [1.6.2](https://github.com/omniaura/mac-runner/compare/v1.6.1...v1.6.2) (2026-02-17)
+
+
+### Bug Fixes
+
+* disable SPM sandbox to resolve unsafe build flags error ([cf54025](https://github.com/omniaura/mac-runner/commit/cf540257161eb8ceed72d5a8ada206ab21228d38)), closes [#15](https://github.com/omniaura/mac-runner/issues/15) [#18](https://github.com/omniaura/mac-runner/issues/18)
+* update CLI version to 1.6.0 to match current release ([eeeff07](https://github.com/omniaura/mac-runner/commit/eeeff070ac63d7409998d638624ebb1506d15a14)), closes [#29](https://github.com/omniaura/mac-runner/issues/29)
+
 ## [1.6.1](https://github.com/omniaura/mac-runner/compare/v1.6.0...v1.6.1) (2026-02-16)
 
 
