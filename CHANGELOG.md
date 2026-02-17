@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/omniaura/mac-runner/compare/v1.6.2...v1.7.0) (2026-02-17)
+
+
+### Features
+
+* add headless mode (default) with optional GUI access ([#28](https://github.com/omniaura/mac-runner/issues/28)) ([f22c47e](https://github.com/omniaura/mac-runner/commit/f22c47ed6e471402ac22c69bd5ca576500c42ed5))
+
 ## [Unreleased]
 
 ### Features
