@@ -79,7 +79,7 @@ The mac-runner codebase is generally **well-structured and maintainable**, with 
 - Or extract to `struct AddRunnerOptions` with parsing method
 - Separate validation from parsing
 
-**Estimated Impact:** MEDIUM - CLI interface, straightforward to test
+**Estimated Impact:** MEDIUM - Command-line interface, straightforward to test
 
 ---
 
@@ -250,6 +250,7 @@ var popover: NSPopover!
 - **LOW (<7):** 84 functions (85.7%)
 
 ### High Complexity Functions
+
 | Function | File | Line | Complexity | Nesting |
 |----------|------|------|------------|---------|
 | `startRunner` | RunnerManager.swift | 294 | 20 | 6 |
@@ -261,6 +262,7 @@ var popover: NSPopover!
 | `handle` | CLIHandler.swift | 11 | 12 | 2 |
 
 ### Medium Complexity Functions
+
 | Function | File | Line | Complexity | Nesting |
 |----------|------|------|------------|---------|
 | `updateRunnerStatuses` | RunnerManager.swift | 526 | 10 | 5 |
@@ -276,6 +278,7 @@ var popover: NSPopover!
 ## Code Duplication Analysis
 
 ### Process Management Patterns
+
 | Pattern | Total Uses | Files Affected |
 |---------|------------|----------------|
 | String from data conversion | 10 | 6 files |
@@ -320,15 +323,18 @@ var popover: NSPopover!
 
 1. Extend `ProcessExecutor` with:
    ```swift
-   static func runProcess(
+   static func runWithWorkingDirectory(
        _ executable: String,
        arguments: [String],
        workingDirectory: String? = nil,
        captureOutput: Bool = true
    ) throws -> ProcessResult
 
-   static extension Pipe {
-       func readAsString() -> String
+   extension Pipe {
+       func readAsUTF8String() -> String
+   }
+   extension Data {
+       func asUTF8String() -> String
    }
    ```
 
