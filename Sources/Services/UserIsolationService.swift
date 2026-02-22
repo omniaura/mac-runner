@@ -97,17 +97,28 @@ class UserIsolationService {
     func setupHomeDirectory(for username: String) throws {
         let homePath = "/Users/\(username)"
         let runnersPath = "\(homePath)/.mac-runner/runners"
+        let tmpPath = "\(homePath)/.tmp"
 
-        // Create home and runners directory
-        try ProcessExecutor.runSudoOrThrow(
-            arguments: ["mkdir", "-p", runnersPath],
-            errorMessage: "Failed to create home directory"
-        )
+        // Create home, runners, and tmp directories
+        for dir in [runnersPath, tmpPath] {
+            try ProcessExecutor.runSudoOrThrow(
+                arguments: ["mkdir", "-p", dir],
+                errorMessage: "Failed to create directory: \(dir)"
+            )
+        }
 
-        // Write .zprofile with Homebrew PATH
+        // Write .zprofile with Homebrew PATH, resource limits, and TMPDIR
         let zprofileContent = """
         # Mac Runner service user profile
         export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+        # Set TMPDIR to a writable location for the service user.
+        # macOS sets TMPDIR per-session via launchd (e.g. /var/folders/...),
+        # but service users running via sudo don't get a launchd session,
+        # so TMPDIR may be unset or point to a directory owned by another user.
+        # Tools like Bun/Node use TMPDIR for worker thread IPC and will fail
+        # with DataCloneError if it's not writable.
+        export TMPDIR="\(tmpPath)"
         """
         let zprofilePath = "\(homePath)/.zprofile"
 
