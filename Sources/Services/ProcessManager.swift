@@ -37,9 +37,11 @@ class ProcessManager {
             }
             logHandle.seekToEndOfFile()
 
-            // Launch process directly
+            // Launch process via bash to set resource limits
             let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: executable)
+            proc.executableURL = URL(fileURLWithPath: "/bin/bash")
+            let escapedExec = executable.replacingOccurrences(of: "'", with: "'\\''")
+            proc.arguments = ["-c", "ulimit -n 65536 && exec '\(escapedExec)'"]
             proc.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
             proc.standardOutput = logHandle
             proc.standardError = logHandle
