@@ -124,6 +124,10 @@ class UserIsolationService {
         # Tools like Bun/Node use TMPDIR for worker thread IPC and will fail
         # with DataCloneError if it's not writable.
         export TMPDIR="\(tmpPath)"
+
+        # Increase file descriptor limit for CI workloads (vitest, jsdom, Bun workers)
+        # Fall back to hard limit if 65536 exceeds it
+        ulimit -n 65536 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
         """
         let zprofilePath = "\(homePath)/.zprofile"
 
