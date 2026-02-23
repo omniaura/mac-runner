@@ -1,3 +1,10 @@
+## [1.7.1](https://github.com/omniaura/mac-runner/compare/v1.7.0...v1.7.1) (2026-02-23)
+
+
+### Bug Fixes
+
+* set TMPDIR for service user to fix oxfmt DataCloneError ([#35](https://github.com/omniaura/mac-runner/issues/35)) ([bce2e39](https://github.com/omniaura/mac-runner/commit/bce2e3969d2732720fb5401df8e810eb9de2af4e)), closes [#33](https://github.com/omniaura/mac-runner/issues/33)
+
 # [1.7.0](https://github.com/omniaura/mac-runner/compare/v1.6.2...v1.7.0) (2026-02-17)
 
 
