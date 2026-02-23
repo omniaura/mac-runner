@@ -97,17 +97,33 @@ class UserIsolationService {
     func setupHomeDirectory(for username: String) throws {
         let homePath = "/Users/\(username)"
         let runnersPath = "\(homePath)/.mac-runner/runners"
+        let tmpPath = "\(homePath)/.tmp"
 
-        // Create home and runners directory
+        // Create home, runners, and tmp directories
+        for dir in [runnersPath, tmpPath] {
+            try ProcessExecutor.runSudoOrThrow(
+                arguments: ["mkdir", "-p", dir],
+                errorMessage: "Failed to create directory: \(dir)"
+            )
+        }
+        // Ensure TMPDIR is private
         try ProcessExecutor.runSudoOrThrow(
-            arguments: ["mkdir", "-p", runnersPath],
-            errorMessage: "Failed to create home directory"
+            arguments: ["chmod", "700", tmpPath],
+            errorMessage: "Failed to set permissions on TMPDIR: \(tmpPath)"
         )
 
-        // Write .zprofile with Homebrew PATH
+        // Write .zprofile with Homebrew PATH, resource limits, and TMPDIR
         let zprofileContent = """
         # Mac Runner service user profile
         export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+        # Set TMPDIR to a writable location for the service user.
+        # macOS sets TMPDIR per-session via launchd (e.g. /var/folders/...),
+        # but service users running via sudo don't get a launchd session,
+        # so TMPDIR may be unset or point to a directory owned by another user.
+        # Tools like Bun/Node use TMPDIR for worker thread IPC and will fail
+        # with DataCloneError if it's not writable.
+        export TMPDIR="\(tmpPath)"
         """
         let zprofilePath = "\(homePath)/.zprofile"
 
@@ -144,7 +160,7 @@ class UserIsolationService {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
 
-        // Use -n (non-interactive) and bash -l to source .zprofile for PATH
+        // Use -n (non-interactive) and zsh -l to source .zprofile for PATH/TMPDIR
         let escapedDir = currentDirectory.replacingOccurrences(of: "'", with: "'\\''")
         let escapedExec = executable.replacingOccurrences(of: "'", with: "'\\''")
 
@@ -157,7 +173,7 @@ class UserIsolationService {
 
         process.arguments = [
             "-n", "-u", username,
-            "/bin/bash", "-l", "-c",
+            "/bin/zsh", "-l", "-c",
             command
         ]
 
@@ -179,8 +195,8 @@ class UserIsolationService {
     // MARK: - Sudoers
 
     func installSudoersEntry(mainUsername: String, serviceUsername: String) throws {
-        // Allow the main user to run sudo -u _macrunner for bash and kill without password
-        // Restrict bash to specific arguments patterns needed for runner management
+        // Allow the main user to run sudo -u _macrunner for zsh/bash and kill without password
+        // Restrict shell to specific arguments patterns needed for runner management
         let entry = """
         # Mac Runner: allow \(mainUsername) to manage runner processes as \(serviceUsername)
         \(mainUsername) ALL=(\(serviceUsername)) NOPASSWD: /bin/bash -l -c *
