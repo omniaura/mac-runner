@@ -191,3 +191,41 @@ jobs:
             "build/MacRunner-${VERSION}.zip" \
             "build/MacRunner-${VERSION}.dmg" \
             --clobber
+
+  # Step 4: Update Homebrew tap (runs on ubuntu, after release)
+  update-homebrew-tap:
+    name: Update Homebrew tap
+    needs: [check-release, build-and-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mac-runner (for cask source)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: omniaura/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update cask in homebrew-tap
+        run: |
+          cp Casks/mac-runner.rb homebrew-tap/Casks/mac-runner.rb
+
+      - name: Commit and push
+        env:
+          VERSION: ${{ needs.check-release.outputs.version }}
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "No changes to cask"
+            exit 0
+          fi
+          git add Casks/mac-runner.rb
+          git commit -m "chore: update mac-runner cask to ${VERSION}"
+          git push origin main
