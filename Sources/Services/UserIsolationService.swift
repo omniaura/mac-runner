@@ -155,7 +155,7 @@ class UserIsolationService {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
 
-        // Use -n (non-interactive) and bash -l to source .zprofile for PATH
+        // Use -n (non-interactive) and zsh -l to source .zprofile for PATH/TMPDIR
         let escapedDir = currentDirectory.replacingOccurrences(of: "'", with: "'\\''")
         let escapedExec = executable.replacingOccurrences(of: "'", with: "'\\''")
 
@@ -168,7 +168,7 @@ class UserIsolationService {
 
         process.arguments = [
             "-n", "-u", username,
-            "/bin/bash", "-l", "-c",
+            "/bin/zsh", "-l", "-c",
             command
         ]
 
@@ -190,8 +190,8 @@ class UserIsolationService {
     // MARK: - Sudoers
 
     func installSudoersEntry(mainUsername: String, serviceUsername: String) throws {
-        // Allow the main user to run sudo -u _macrunner for bash and kill without password
-        // Restrict bash to specific arguments patterns needed for runner management
+        // Allow the main user to run sudo -u _macrunner for zsh/bash and kill without password
+        // Restrict shell to specific arguments patterns needed for runner management
         let entry = """
         # Mac Runner: allow \(mainUsername) to manage runner processes as \(serviceUsername)
         \(mainUsername) ALL=(\(serviceUsername)) NOPASSWD: /bin/bash -l -c *
