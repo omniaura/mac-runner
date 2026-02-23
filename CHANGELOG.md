@@ -1,3 +1,10 @@
+## [1.7.2](https://github.com/omniaura/mac-runner/compare/v1.7.1...v1.7.2) (2026-02-23)
+
+
+### Bug Fixes
+
+* increase file descriptor limit to 65536 for runner processes ([#34](https://github.com/omniaura/mac-runner/issues/34)) ([297846e](https://github.com/omniaura/mac-runner/commit/297846e157212ab15cb666fd4ab56be96976297f)), closes [#32](https://github.com/omniaura/mac-runner/issues/32)
+
 ## [1.7.1](https://github.com/omniaura/mac-runner/compare/v1.7.0...v1.7.1) (2026-02-23)
 
 
