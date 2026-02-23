@@ -106,6 +106,11 @@ class UserIsolationService {
                 errorMessage: "Failed to create directory: \(dir)"
             )
         }
+        // Ensure TMPDIR is private
+        try ProcessExecutor.runSudoOrThrow(
+            arguments: ["chmod", "700", tmpPath],
+            errorMessage: "Failed to set permissions on TMPDIR: \(tmpPath)"
+        )
 
         // Write .zprofile with Homebrew PATH, resource limits, and TMPDIR
         let zprofileContent = """
