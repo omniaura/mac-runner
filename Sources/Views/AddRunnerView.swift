@@ -9,7 +9,8 @@ struct AddRunnerView: View {
     @State private var labelsText = "macos, mac-runner"
     @State private var selectedIsolation: IsolationSelection = .global
     @State private var enableGUI = false
-    @State private var repos: [String] = []
+    @State private var repoSections: [(header: String, repos: [String])] = []
+    @State private var repoSearchText = ""
     @State private var isLoadingRepos = false
     @State private var showRepoPicker = false
     @State private var isAdding = false
@@ -30,6 +31,17 @@ struct AddRunnerView: View {
             case .user: return .dedicatedUser(username: IsolationMode.defaultUsername)
             case .container: return .container
             }
+        }
+    }
+
+    private var filteredSections: [(header: String, repos: [String])] {
+        if repoSearchText.isEmpty {
+            return repoSections
+        }
+        let query = repoSearchText.lowercased()
+        return repoSections.compactMap { section in
+            let filtered = section.repos.filter { $0.lowercased().contains(query) }
+            return filtered.isEmpty ? nil : (header: section.header, repos: filtered)
         }
     }
 
@@ -73,36 +85,65 @@ struct AddRunnerView: View {
                             }
                         }
 
-                        if showRepoPicker, !repos.isEmpty {
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    ForEach(repos, id: \.self) { r in
-                                        Button(action: {
-                                            repo = r
-                                            showRepoPicker = false
-                                        }) {
-                                            HStack {
-                                                Text(r)
-                                                    .font(.system(.caption, design: .monospaced))
-                                                Spacer()
-                                                if r == repo {
-                                                    Image(systemName: "checkmark")
-                                                        .foregroundColor(.accentColor)
-                                                        .font(.caption)
+                        if showRepoPicker, !repoSections.isEmpty {
+                            VStack(spacing: 0) {
+                                TextField("Search repos...", text: $repoSearchText)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.caption)
+                                    .padding(6)
+
+                                Divider()
+
+                                if filteredSections.isEmpty {
+                                    Text("No matching repos")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .padding(8)
+                                } else {
+                                    ScrollView {
+                                        VStack(alignment: .leading, spacing: 0) {
+                                            ForEach(filteredSections, id: \.header) { section in
+                                                Text(section.header)
+                                                    .font(.system(.caption2, design: .monospaced))
+                                                    .fontWeight(.semibold)
+                                                    .foregroundColor(.secondary)
+                                                    .padding(.horizontal, 8)
+                                                    .padding(.top, 8)
+                                                    .padding(.bottom, 4)
+
+                                                ForEach(section.repos, id: \.self) { r in
+                                                    Button(action: {
+                                                        repo = r
+                                                        showRepoPicker = false
+                                                        repoSearchText = ""
+                                                    }) {
+                                                        HStack {
+                                                            Text(r)
+                                                                .font(.system(.caption, design: .monospaced))
+                                                            Spacer()
+                                                            if r == repo {
+                                                                Image(systemName: "checkmark")
+                                                                    .foregroundColor(.accentColor)
+                                                                    .font(.caption)
+                                                            }
+                                                        }
+                                                        .contentShape(Rectangle())
+                                                        .padding(.vertical, 4)
+                                                        .padding(.horizontal, 8)
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                }
+
+                                                if section.header != filteredSections.last?.header {
+                                                    Divider()
+                                                        .padding(.top, 4)
                                                 }
                                             }
-                                            .contentShape(Rectangle())
-                                            .padding(.vertical, 4)
-                                            .padding(.horizontal, 8)
-                                        }
-                                        .buttonStyle(.plain)
-                                        if r != repos.last {
-                                            Divider()
                                         }
                                     }
+                                    .frame(maxHeight: 200)
                                 }
                             }
-                            .frame(height: min(CGFloat(repos.count) * 28, 140))
                             .background(Color.gray.opacity(0.1))
                             .cornerRadius(6)
                             .overlay(
@@ -215,7 +256,17 @@ struct AddRunnerView: View {
         errorMessage = nil
 
         do {
-            repos = try await GHCLIService.shared.listRepos()
+            let allRepos = try await GHCLIService.shared.listAllRepos()
+            var sections: [(header: String, repos: [String])] = []
+
+            if !allRepos.personal.isEmpty {
+                sections.append((header: "Personal", repos: allRepos.personal.sorted()))
+            }
+            for (org, repos) in allRepos.orgRepos where !repos.isEmpty {
+                sections.append((header: org, repos: repos.sorted()))
+            }
+
+            repoSections = sections
             showRepoPicker = true
         } catch {
             errorMessage = error.localizedDescription
