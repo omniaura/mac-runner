@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/omniaura/mac-runner/compare/v1.7.2...v1.8.0) (2026-03-03)
+
+
+### Features
+
+* include org repos in Browse picker with search and grouping ([#38](https://github.com/omniaura/mac-runner/issues/38)) ([6fa5173](https://github.com/omniaura/mac-runner/commit/6fa51738866951e2ecdffa00a2d8a3c17cefb5af)), closes [#37](https://github.com/omniaura/mac-runner/issues/37)
+
 ## [1.7.2](https://github.com/omniaura/mac-runner/compare/v1.7.1...v1.7.2) (2026-02-23)
 
 
