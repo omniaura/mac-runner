@@ -13,7 +13,9 @@ struct AddRunnerView: View {
     @State private var repoSearchText = ""
     @State private var isLoadingRepos = false
     @State private var showRepoPicker = false
+    @State private var numberOfInstances = 1
     @State private var isAdding = false
+    @State private var addingProgress: (current: Int, total: Int)?
     @State private var errorMessage: String?
 
     enum IsolationSelection: String, CaseIterable, Identifiable {
@@ -212,6 +214,38 @@ struct AddRunnerView: View {
                         }
                     }
 
+                    // Number of Instances
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Number of Instances")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        HStack {
+                            Stepper(value: $numberOfInstances, in: 1...20) {
+                                Text("\(numberOfInstances)")
+                                    .font(.system(.body, design: .monospaced))
+                                    .frame(minWidth: 24, alignment: .center)
+                            }
+                        }
+
+                        if numberOfInstances > 1 {
+                            let baseName = name.isEmpty ? "mac-runner" : name
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(1...min(numberOfInstances, 5), id: \.self) { i in
+                                    Text("\(baseName)-\(i)")
+                                        .font(.system(.caption, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                }
+                                if numberOfInstances > 5 {
+                                    Text("... and \(numberOfInstances - 5) more")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(.top, 2)
+                        }
+                    }
+
                     if let error = errorMessage {
                         Text(error)
                             .foregroundColor(.red)
@@ -233,12 +267,17 @@ struct AddRunnerView: View {
                 Spacer()
 
                 if isAdding {
+                    if let progress = addingProgress, progress.total > 1 {
+                        Text("\(progress.current)/\(progress.total)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                     ProgressView()
                         .controlSize(.small)
                         .padding(.trailing, 8)
                 }
 
-                Button("Add Runner") {
+                Button(numberOfInstances > 1 ? "Add \(numberOfInstances) Runners" : "Add Runner") {
                     Task { await addRunner() }
                 }
                 .buttonStyle(.borderedProminent)
@@ -247,7 +286,7 @@ struct AddRunnerView: View {
             }
             .padding()
         }
-        .frame(width: 400, height: 480)
+        .frame(width: 400, height: 560)
     }
 
     private func loadRepos() async {
@@ -275,10 +314,14 @@ struct AddRunnerView: View {
 
     private func addRunner() async {
         isAdding = true
-        defer { isAdding = false }
+        addingProgress = nil
+        defer {
+            isAdding = false
+            addingProgress = nil
+        }
         errorMessage = nil
 
-        let runnerName = name.isEmpty
+        let baseName = name.isEmpty
             ? "mac-runner-\(Int.random(in: 1000...9999))"
             : name
 
@@ -288,12 +331,16 @@ struct AddRunnerView: View {
             .filter { !$0.isEmpty }
 
         do {
-            try await runnerManager.addRunner(
-                name: runnerName,
+            try await runnerManager.addRunners(
+                baseName: baseName,
                 repo: repo,
                 labels: labels.isEmpty ? ["macos"] : labels,
+                count: numberOfInstances,
                 isolationMode: selectedIsolation.isolationMode,
-                enableGUI: enableGUI
+                enableGUI: enableGUI,
+                onProgress: { current, total in
+                    addingProgress = (current: current, total: total)
+                }
             )
             dismiss()
         } catch {
