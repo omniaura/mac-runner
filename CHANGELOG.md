@@ -1,3 +1,10 @@
+## [1.8.1](https://github.com/omniaura/mac-runner/compare/v1.8.0...v1.8.1) (2026-03-04)
+
+
+### Bug Fixes
+
+* resolve duplicate runner naming race condition and add bulk creation ([#17](https://github.com/omniaura/mac-runner/issues/17)) ([#45](https://github.com/omniaura/mac-runner/issues/45)) ([28d7900](https://github.com/omniaura/mac-runner/commit/28d790062b99f02a0c15cc72f5d7f0ebc032e40e))
+
 # [1.8.0](https://github.com/omniaura/mac-runner/compare/v1.7.2...v1.8.0) (2026-03-03)
 
 
