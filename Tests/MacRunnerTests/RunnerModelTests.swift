@@ -22,6 +22,7 @@ final class RunnerModelTests: XCTestCase {
         XCTAssertEqual(runner.status, .stopped)
         XCTAssertEqual(runner.busy, false)
         XCTAssertNil(runner.githubRunnerId)
+        XCTAssertNil(runner.lastRestartEvent)
     }
 
     func testRunnerInitializationWithDefaults() {
@@ -35,6 +36,7 @@ final class RunnerModelTests: XCTestCase {
         XCTAssertEqual(runner.enabled, true)
         XCTAssertEqual(runner.status, .stopped)
         XCTAssertEqual(runner.busy, false)
+        XCTAssertNil(runner.lastRestartEvent)
     }
 
     // MARK: - Coding Tests
@@ -49,7 +51,8 @@ final class RunnerModelTests: XCTestCase {
             status: .running,
             githubRunnerId: 12345,
             busy: true,
-            isolationMode: .container
+            isolationMode: .container,
+            lastRestartEvent: "Runner auto-restarted successfully."
         )
 
         let encoder = JSONEncoder()
@@ -62,6 +65,7 @@ final class RunnerModelTests: XCTestCase {
         XCTAssertEqual(json?["enabled"] as? Bool, true)
         XCTAssertEqual(json?["busy"] as? Bool, true)
         XCTAssertEqual(json?["githubRunnerId"] as? Int, 12345)
+        XCTAssertEqual(json?["lastRestartEvent"] as? String, "Runner auto-restarted successfully.")
 
         // Check isolation mode is encoded
         let isolationModeData = json?["isolationMode"] as? [String: Any]
@@ -79,6 +83,7 @@ final class RunnerModelTests: XCTestCase {
             "status": "running",
             "githubRunnerId": 12345,
             "busy": true,
+            "lastRestartEvent": "Runner auto-restarted successfully.",
             "isolationMode": {
                 "type": "container"
             }
@@ -96,6 +101,7 @@ final class RunnerModelTests: XCTestCase {
         XCTAssertEqual(runner.githubRunnerId, 12345)
         XCTAssertEqual(runner.busy, true)
         XCTAssertEqual(runner.isolationMode, .container)
+        XCTAssertEqual(runner.lastRestartEvent, "Runner auto-restarted successfully.")
     }
 
     func testRunnerDecodingWithoutIsolationMode() throws {
@@ -115,6 +121,7 @@ final class RunnerModelTests: XCTestCase {
 
         XCTAssertNil(runner.isolationMode)
         XCTAssertEqual(runner.busy, false)  // Default value for backward compatibility
+        XCTAssertNil(runner.lastRestartEvent)
     }
 
     func testRunnerDecodingBackwardCompatibility() throws {
@@ -138,6 +145,7 @@ final class RunnerModelTests: XCTestCase {
         XCTAssertEqual(runner.busy, false)  // Default
         XCTAssertNil(runner.isolationMode)  // Default
         XCTAssertEqual(runner.githubRunnerId, 999)
+        XCTAssertNil(runner.lastRestartEvent)
     }
 
     // MARK: - Effective Isolation Mode Tests

@@ -214,6 +214,13 @@ struct RunnerRow: View {
                             .cornerRadius(4)
                     }
                 }
+
+                if let restartEvent = runner.lastRestartEvent {
+                    Text(restartEvent)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                }
             }
 
             Spacer()
@@ -292,6 +299,39 @@ struct SettingsView: View {
                 ))
 
                 Text("When enabled, Mac Runner starts automatically when you log in and restarts any runners that were previously running.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Toggle("Auto-Restart on Crash", isOn: Binding(
+                    get: { runnerManager.currentSettings.autoRestartEnabled },
+                    set: { newValue in
+                        var settings = runnerManager.currentSettings
+                        settings.autoRestartEnabled = newValue
+                        runnerManager.updateSettings(settings)
+                    }
+                ))
+
+                HStack {
+                    Text("Max retries in 10 minutes")
+                    Spacer()
+                    Stepper(
+                        value: Binding(
+                            get: { runnerManager.currentSettings.autoRestartMaxRetries },
+                            set: { newValue in
+                                var settings = runnerManager.currentSettings
+                                settings.autoRestartMaxRetries = max(1, newValue)
+                                runnerManager.updateSettings(settings)
+                            }
+                        ),
+                        in: 1...20
+                    ) {
+                        Text("\(runnerManager.currentSettings.autoRestartMaxRetries)")
+                            .monospacedDigit()
+                    }
+                    .labelsHidden()
+                }
+
+                Text("Crash recovery uses exponential backoff (5s, 10s, 20s, capped at 60s).")
                     .font(.caption)
                     .foregroundColor(.secondary)
 

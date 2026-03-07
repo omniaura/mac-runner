@@ -11,6 +11,7 @@ struct Runner: Identifiable, Codable, Sendable {
     var busy: Bool  // Whether runner is currently executing a job
     var isolationMode: IsolationMode?  // Per-runner isolation override (nil = use global setting)
     var enableGUI: Bool  // Whether to enable GUI access for this runner (default: false, headless)
+    var lastRestartEvent: String?
 
     init(
         id: UUID = UUID(),
@@ -22,7 +23,8 @@ struct Runner: Identifiable, Codable, Sendable {
         githubRunnerId: Int? = nil,
         busy: Bool = false,
         isolationMode: IsolationMode? = nil,
-        enableGUI: Bool = false
+        enableGUI: Bool = false,
+        lastRestartEvent: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -34,6 +36,7 @@ struct Runner: Identifiable, Codable, Sendable {
         self.busy = busy
         self.isolationMode = isolationMode
         self.enableGUI = enableGUI
+        self.lastRestartEvent = lastRestartEvent
     }
 
     init(from decoder: Decoder) throws {
@@ -51,6 +54,8 @@ struct Runner: Identifiable, Codable, Sendable {
         isolationMode = try container.decodeIfPresent(IsolationMode.self, forKey: .isolationMode)
         // Default GUI access to false (headless) for backward compatibility
         enableGUI = try container.decodeIfPresent(Bool.self, forKey: .enableGUI) ?? false
+        // Default restart event to nil for backward compatibility
+        lastRestartEvent = try container.decodeIfPresent(String.self, forKey: .lastRestartEvent)
     }
 
     /// Returns the effective isolation mode for this runner.
@@ -168,19 +173,32 @@ struct AppSettings: Codable, Sendable {
     var pauseOnBattery: Bool
     var quietHours: QuietHours?
     var isolationMode: IsolationMode
+    var autoRestartEnabled: Bool
+    var autoRestartMaxRetries: Int
 
     static let `default` = AppSettings(
         startOnLogin: false,
         pauseOnBattery: false,
         quietHours: nil,
-        isolationMode: .none
+        isolationMode: .none,
+        autoRestartEnabled: true,
+        autoRestartMaxRetries: 5
     )
 
-    init(startOnLogin: Bool = false, pauseOnBattery: Bool = false, quietHours: QuietHours? = nil, isolationMode: IsolationMode = .none) {
+    init(
+        startOnLogin: Bool = false,
+        pauseOnBattery: Bool = false,
+        quietHours: QuietHours? = nil,
+        isolationMode: IsolationMode = .none,
+        autoRestartEnabled: Bool = true,
+        autoRestartMaxRetries: Int = 5
+    ) {
         self.startOnLogin = startOnLogin
         self.pauseOnBattery = pauseOnBattery
         self.quietHours = quietHours
         self.isolationMode = isolationMode
+        self.autoRestartEnabled = autoRestartEnabled
+        self.autoRestartMaxRetries = max(1, autoRestartMaxRetries)
     }
 
     init(from decoder: Decoder) throws {
@@ -189,6 +207,8 @@ struct AppSettings: Codable, Sendable {
         pauseOnBattery = try container.decodeIfPresent(Bool.self, forKey: .pauseOnBattery) ?? false
         quietHours = try container.decodeIfPresent(QuietHours.self, forKey: .quietHours)
         isolationMode = try container.decodeIfPresent(IsolationMode.self, forKey: .isolationMode) ?? .none
+        autoRestartEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoRestartEnabled) ?? true
+        autoRestartMaxRetries = max(1, try container.decodeIfPresent(Int.self, forKey: .autoRestartMaxRetries) ?? 5)
     }
 }
 

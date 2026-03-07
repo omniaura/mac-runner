@@ -36,6 +36,12 @@ class RunnerManager: ObservableObject {
     private var runnersToAutoRestart: Set<UUID> = []
     /// Names reserved by in-flight addRunner calls to prevent duplicate naming race conditions.
     private var pendingRunnerNames: Set<String> = []
+    private var manualStopRequests: Set<UUID> = []
+    private var restartAttemptHistory: [UUID: [Date]] = [:]
+    private var scheduledRestarts: [UUID: Task<Void, Never>] = [:]
+    private let restartWindowSeconds: TimeInterval = 600
+    private let restartBaseDelaySeconds = 5
+    private let restartMaxDelaySeconds = 60
 
     /// Initialize the RunnerManager and restore runtime state.
     ///
@@ -100,6 +106,9 @@ class RunnerManager: ObservableObject {
 
     deinit {
         statusPollingTask?.cancel()
+        for task in scheduledRestarts.values {
+            task.cancel()
+        }
     }
 
     // MARK: - Configuration
@@ -279,6 +288,10 @@ class RunnerManager: ObservableObject {
 
         // Clean up PID file
         pidManager.removePID(for: id)
+        manualStopRequests.remove(id)
+        scheduledRestarts[id]?.cancel()
+        scheduledRestarts.removeValue(forKey: id)
+        restartAttemptHistory.removeValue(forKey: id)
 
         // Remove from list
         runners.removeAll(where: { $0.id == id })
@@ -302,6 +315,9 @@ class RunnerManager: ObservableObject {
         if runnerProcesses[id] != nil || processManager.isProcessAlive(for: id) {
             throw RunnerError.alreadyRunning
         }
+
+        scheduledRestarts[id]?.cancel()
+        scheduledRestarts.removeValue(forKey: id)
 
         let runner = runners[index]
         // Use per-runner isolation mode if specified, otherwise use global setting
@@ -372,13 +388,19 @@ class RunnerManager: ObservableObject {
                         if let linuxContainer = container as? LinuxContainer {
                             let exitCode = try await linuxContainer.wait()
                             print("Container \(id.uuidString) exited with code: \(exitCode)")
+                            await MainActor.run {
+                                handleRunnerTermination(id, cause: .containerExit(status: Int(exitCode)))
+                            }
+                        } else {
+                            await MainActor.run {
+                                handleRunnerTermination(id, cause: .monitoringError(message: "Container handle unavailable"))
+                            }
                         }
                         #endif
-                        await MainActor.run {
-                            handleRunnerTermination(id)
-                        }
                     } catch {
-                        print("Container monitoring error: \(error)")
+                        await MainActor.run {
+                            handleRunnerTermination(id, cause: .monitoringError(message: error.localizedDescription))
+                        }
                     }
                 }
             } else {
@@ -400,6 +422,18 @@ class RunnerManager: ObservableObject {
 
             // Store process reference for in-memory tracking (GUI)
             runnerProcesses[id] = process
+
+            process.terminationHandler = { [weak self] terminatedProcess in
+                Task { @MainActor [weak self] in
+                    self?.handleRunnerTermination(
+                        id,
+                        cause: .process(
+                            reason: terminatedProcess.terminationReason,
+                            status: terminatedProcess.terminationStatus
+                        )
+                    )
+                }
+            }
         }
 
         runners[index].status = .running
@@ -422,38 +456,49 @@ class RunnerManager: ObservableObject {
         let runner = runners[index]
         // Use per-runner isolation mode if specified, otherwise use global setting
         let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
+        manualStopRequests.insert(id)
 
         // Check if this is a container-based runner
-        if case .container = isolation {
-            #if canImport(Containerization)
-            if #available(macOS 26.0, *) {
-                if let container = runnerContainers[id] {
-                    guard let containerService = containerService else {
-                        throw RunnerError.containerServiceNotAvailable
-                    }
+        do {
+            if case .container = isolation {
+                #if canImport(Containerization)
+                if #available(macOS 26.0, *) {
+                    if let container = runnerContainers[id] {
+                        guard let containerService = containerService else {
+                            throw RunnerError.containerServiceNotAvailable
+                        }
 
-                    // Stop and clean up container
-                    if let linuxContainer = container as? LinuxContainer {
-                        try await containerService.stopContainer(linuxContainer)
+                        // Stop and clean up container
+                        if let linuxContainer = container as? LinuxContainer {
+                            try await containerService.stopContainer(linuxContainer)
+                        }
+                        try await containerService.deleteContainer(id: id.uuidString)
+                        runnerContainers.removeValue(forKey: id)
+                    } else {
+                        throw RunnerError.notRunning
                     }
-                    try await containerService.deleteContainer(id: id.uuidString)
-                    runnerContainers.removeValue(forKey: id)
-                } else {
-                    throw RunnerError.notRunning
+                }
+                #endif
+            } else {
+                // Standard process-based isolation - use ProcessManager
+                let inMemoryProcess = runnerProcesses[id]
+                try processManager.stopProcess(for: id, isolation: isolation, inMemoryProcess: inMemoryProcess)
+
+                if inMemoryProcess != nil {
+                    runnerProcesses.removeValue(forKey: id)
                 }
             }
-            #endif
-        } else {
-            // Standard process-based isolation - use ProcessManager
-            let inMemoryProcess = runnerProcesses[id]
-            try processManager.stopProcess(for: id, isolation: isolation, inMemoryProcess: inMemoryProcess)
-
-            if inMemoryProcess != nil {
-                runnerProcesses.removeValue(forKey: id)
-            }
+        } catch {
+            manualStopRequests.remove(id)
+            throw error
         }
 
+        scheduledRestarts[id]?.cancel()
+        scheduledRestarts.removeValue(forKey: id)
+        restartAttemptHistory.removeValue(forKey: id)
+
         runners[index].status = .stopped
+        runners[index].lastRestartEvent = nil
         saveConfiguration()
     }
 
@@ -709,19 +754,155 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Private Helpers
 
-    /// Handle cleanup when a runner process terminates unexpectedly.
-    ///
-    /// Removes process references, cleans up PID files, and updates the runner status to stopped.
-    ///
-    /// - Parameter id: UUID of the terminated runner
-    private func handleRunnerTermination(_ id: UUID) {
+    private enum RunnerTerminationCause {
+        case process(reason: Process.TerminationReason, status: Int32)
+        case containerExit(status: Int)
+        case monitoringError(message: String)
+
+        var isUnexpected: Bool {
+            switch self {
+            case .process(let reason, let status):
+                return reason != .exit || status != 0
+            case .containerExit(let status):
+                return status != 0
+            case .monitoringError:
+                return true
+            }
+        }
+
+        var description: String {
+            switch self {
+            case .process(let reason, let status):
+                let reasonText = reason == .exit ? "exit" : "signal"
+                return "process \(reasonText), code \(status)"
+            case .containerExit(let status):
+                return "container exit code \(status)"
+            case .monitoringError(let message):
+                return "monitoring error: \(message)"
+            }
+        }
+    }
+
+    /// Handle cleanup when a runner process/container terminates.
+    private func handleRunnerTermination(_ id: UUID, cause: RunnerTerminationCause) {
         runnerProcesses.removeValue(forKey: id)
+        runnerContainers.removeValue(forKey: id)
         pidManager.removePID(for: id)
 
+        let wasManualStop = manualStopRequests.remove(id) != nil
+
         if let index = runners.firstIndex(where: { $0.id == id }) {
-            runners[index].status = .stopped
+            if cause.isUnexpected && !wasManualStop {
+                if scheduleAutoRestart(for: id, cause: cause, runnerIndex: index) {
+                    saveConfiguration()
+                    return
+                }
+                runners[index].status = .error
+                runners[index].lastRestartEvent = "Runner crashed (\(cause.description)); auto-restart stopped."
+                logRunnerEvent(for: runners[index], message: runners[index].lastRestartEvent ?? "")
+            } else {
+                runners[index].status = .stopped
+                if wasManualStop {
+                    runners[index].lastRestartEvent = nil
+                }
+            }
             saveConfiguration()
         }
+    }
+
+    private func scheduleAutoRestart(for id: UUID, cause: RunnerTerminationCause, runnerIndex: Int) -> Bool {
+        guard currentSettings.autoRestartEnabled else {
+            runners[runnerIndex].lastRestartEvent = "Runner crashed (\(cause.description)); auto-restart disabled."
+            logRunnerEvent(for: runners[runnerIndex], message: runners[runnerIndex].lastRestartEvent ?? "")
+            return false
+        }
+
+        let now = Date()
+        let cutoff = now.addingTimeInterval(-restartWindowSeconds)
+        var attempts = restartAttemptHistory[id, default: []].filter { $0 >= cutoff }
+        let maxRetries = max(1, currentSettings.autoRestartMaxRetries)
+
+        guard attempts.count < maxRetries else {
+            restartAttemptHistory[id] = attempts
+            runners[runnerIndex].lastRestartEvent = "Runner crashed (\(cause.description)); reached max retries (\(maxRetries)) in 10m."
+            logRunnerEvent(for: runners[runnerIndex], message: runners[runnerIndex].lastRestartEvent ?? "")
+            return false
+        }
+
+        attempts.append(now)
+        restartAttemptHistory[id] = attempts
+
+        let attemptNumber = attempts.count
+        let delay = restartDelaySeconds(forAttempt: attemptNumber)
+        runners[runnerIndex].status = .stopped
+        runners[runnerIndex].lastRestartEvent = "Runner crashed (\(cause.description)); restarting in \(delay)s (attempt \(attemptNumber)/\(maxRetries))."
+        logRunnerEvent(for: runners[runnerIndex], message: runners[runnerIndex].lastRestartEvent ?? "")
+
+        scheduledRestarts[id]?.cancel()
+        scheduledRestarts[id] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            await self?.performScheduledRestart(for: id)
+        }
+
+        return true
+    }
+
+    private func restartDelaySeconds(forAttempt attempt: Int) -> Int {
+        guard attempt > 0 else { return restartBaseDelaySeconds }
+        let exponentialDelay = restartBaseDelaySeconds * (1 << (attempt - 1))
+        return min(exponentialDelay, restartMaxDelaySeconds)
+    }
+
+    private func performScheduledRestart(for id: UUID) async {
+        defer { scheduledRestarts.removeValue(forKey: id) }
+
+        guard runners.contains(where: { $0.id == id }) else { return }
+
+        do {
+            try await startRunner(id)
+            if let refreshedIndex = runners.firstIndex(where: { $0.id == id }) {
+                runners[refreshedIndex].lastRestartEvent = "Runner auto-restarted successfully."
+                logRunnerEvent(for: runners[refreshedIndex], message: runners[refreshedIndex].lastRestartEvent ?? "")
+                saveConfiguration()
+            }
+        } catch {
+            if let refreshedIndex = runners.firstIndex(where: { $0.id == id }) {
+                runners[refreshedIndex].status = .error
+                runners[refreshedIndex].lastRestartEvent = "Auto-restart failed: \(error.localizedDescription)"
+                logRunnerEvent(for: runners[refreshedIndex], message: runners[refreshedIndex].lastRestartEvent ?? "")
+                saveConfiguration()
+            }
+        }
+    }
+
+    private func logRunnerEvent(for runner: Runner, message: String) {
+        guard !message.isEmpty else { return }
+
+        let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
+        guard let runnerDir = try? RunnerDirectory.path(for: runner.id, isolation: isolation) else {
+            print("[Runner \(runner.name)] \(message)")
+            return
+        }
+
+        let logPath = "\(runnerDir)/runner.log"
+        let formatter = ISO8601DateFormatter()
+        let timestamp = formatter.string(from: Date())
+        let line = "[\(timestamp)] [mac-runner] \(message)\n"
+
+        if !FileManager.default.fileExists(atPath: logPath) {
+            FileManager.default.createFile(atPath: logPath, contents: nil)
+        }
+
+        if let handle = FileHandle(forWritingAtPath: logPath) {
+            handle.seekToEndOfFile()
+            if let data = line.data(using: .utf8) {
+                handle.write(data)
+            }
+            try? handle.close()
+        }
+
+        print("[Runner \(runner.name)] \(message)")
     }
 }
 
