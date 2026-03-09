@@ -386,10 +386,10 @@ class RunnerManager: ObservableObject {
                     do {
                         #if canImport(Containerization)
                         if let linuxContainer = container as? LinuxContainer {
-                            let exitCode = try await linuxContainer.wait()
-                            print("Container \(id.uuidString) exited with code: \(exitCode)")
+                            let exitStatus = try await linuxContainer.wait()
+                            print("Container \(id.uuidString) exited with code: \(exitStatus.exitCode)")
                             await MainActor.run {
-                                handleRunnerTermination(id, cause: .containerExit(status: Int(exitCode)))
+                                handleRunnerTermination(id, cause: .containerExit(status: Int(exitStatus.exitCode)))
                             }
                         } else {
                             await MainActor.run {
