@@ -37,6 +37,14 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Reset SwiftPM state
+        run: |
+          rm -rf .build
+          rm -f Package.resolved
+          rm -rf ~/Library/Caches/org.swift.swiftpm
+          rm -rf ~/.swiftpm/cache
+          swift package reset
+
       - name: Resolve dependencies
         run: swift package resolve
 
