@@ -38,15 +38,15 @@ brew install --cask mac-runner
 
 Download the latest DMG from [Releases](https://github.com/omniaura/mac-runner/releases)
 
-### Unsigned Binary
+### First Launch
 
-Mac Runner is not code-signed yet. macOS Gatekeeper will block the first launch. To allow it:
+Current releases should open normally after install. If macOS warns about the app on first launch, clear the quarantine attribute and try again:
 
 ```bash
 xattr -cr /Applications/MacRunner.app
 ```
 
-Or: right-click the app → Open → click "Open" in the dialog.
+You can also right-click the app in Applications and choose "Open".
 
 ### Prerequisites
 
