@@ -109,7 +109,7 @@ class RunnerManager: ObservableObject {
     }
 
     #if canImport(Containerization)
-    static func preferredKernelPath(
+    nonisolated static func preferredKernelPath(
         bundleResourceURL: URL?,
         applicationSupportURL: URL,
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
