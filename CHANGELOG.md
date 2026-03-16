@@ -1,3 +1,11 @@
+## [1.10.1](https://github.com/omniaura/mac-runner/compare/v1.10.0...v1.10.1) (2026-03-16)
+
+
+### Bug Fixes
+
+* clean up macOS startup and launch guidance ([#56](https://github.com/omniaura/mac-runner/issues/56)) ([0b1169a](https://github.com/omniaura/mac-runner/commit/0b1169a6e4bdfb04b2b9fc04e26cb916cb6766c6))
+* reconcile Launch at Login checkbox with macOS system state ([#57](https://github.com/omniaura/mac-runner/issues/57)) ([2da139f](https://github.com/omniaura/mac-runner/commit/2da139fa13fe40fbf478d81392745945ce2aa125))
+
 # [1.10.0](https://github.com/omniaura/mac-runner/compare/v1.9.0...v1.10.0) (2026-03-16)
 
 
