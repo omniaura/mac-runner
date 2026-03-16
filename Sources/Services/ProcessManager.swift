@@ -16,6 +16,7 @@ class ProcessManager {
     ///   - logFile: Path to log file for stdout/stderr
     ///   - isolation: Isolation mode to use
     ///   - enableGUI: Whether to enable GUI access (default: false, headless)
+    ///   - openFileLimit: Maximum open file limit to apply before launch
     /// - Returns: The launched Process object
     /// - Throws: Error if process launch or PID write fails
     func startProcess(
@@ -24,7 +25,8 @@ class ProcessManager {
         workingDirectory: String,
         logFile: String,
         isolation: IsolationMode,
-        enableGUI: Bool = false
+        enableGUI: Bool = false,
+        openFileLimit: Int
     ) throws -> Process {
         let process: Process
 
@@ -41,7 +43,7 @@ class ProcessManager {
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/bin/bash")
             let escapedExec = executable.replacingOccurrences(of: "'", with: "'\\''")
-            proc.arguments = ["-c", "ulimit -n 65536 && exec '\(escapedExec)'"]
+            proc.arguments = ["-c", ResourceLimits.shellCommand("exec '\(escapedExec)'", openFileLimit: openFileLimit)]
             proc.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
             proc.standardOutput = logHandle
             proc.standardError = logHandle
@@ -103,7 +105,8 @@ class ProcessManager {
                     currentDirectory: workingDirectory,
                     standardOutput: logHandle,
                     standardError: logHandle,
-                    enableGUI: enableGUI
+                    enableGUI: enableGUI,
+                    openFileLimit: openFileLimit
                 )
                 process = proc
             } catch {

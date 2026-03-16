@@ -254,8 +254,16 @@ class RunnerManager: ObservableObject {
     ///   - labels: Labels to assign to the runner for workflow targeting
     ///   - isolationMode: Optional isolation mode override (nil uses global setting)
     ///   - enableGUI: Whether to enable GUI access for this runner (default: false, headless)
+    ///   - openFileLimit: Optional max open file override (nil uses global setting)
     /// - Throws: RunnerError if validation or setup fails
-    func addRunner(name: String, repo: String, labels: [String], isolationMode: IsolationMode? = nil, enableGUI: Bool = false) async throws {
+    func addRunner(
+        name: String,
+        repo: String,
+        labels: [String],
+        isolationMode: IsolationMode? = nil,
+        enableGUI: Bool = false,
+        openFileLimit: Int? = nil
+    ) async throws {
         isLoading = true
         defer { isLoading = false }
 
@@ -275,7 +283,8 @@ class RunnerManager: ObservableObject {
             enabled: true,
             status: .stopped,
             isolationMode: isolationMode,
-            enableGUI: enableGUI
+            enableGUI: enableGUI,
+            openFileLimit: openFileLimit
         )
 
         // Use per-runner isolation mode if specified, otherwise use global setting
@@ -413,7 +422,8 @@ class RunnerManager: ObservableObject {
                     enableNestedVirtualization: false,
                     workspaceURL: URL(fileURLWithPath: runnerDir),
                     repositoryURL: runner.repo,
-                    registrationToken: registrationToken
+                    registrationToken: registrationToken,
+                    openFileLimit: runner.effectiveOpenFileLimit(global: currentSettings.openFileLimit)
                 )
 
                 // Create and start container
@@ -463,7 +473,8 @@ class RunnerManager: ObservableObject {
                 workingDirectory: runnerDir,
                 logFile: logFile,
                 isolation: isolation,
-                enableGUI: runner.enableGUI
+                enableGUI: runner.enableGUI,
+                openFileLimit: runner.effectiveOpenFileLimit(global: currentSettings.openFileLimit)
             )
 
             // Store process reference for in-memory tracking (GUI)
@@ -709,13 +720,14 @@ class RunnerManager: ObservableObject {
         pendingRunnerNames.insert(newName)
         defer { pendingRunnerNames.remove(newName) }
 
-        // Create duplicate with same settings, preserving isolation mode and GUI access
+        // Create duplicate with same settings, preserving isolation mode, GUI access, and resource limits
         try await addRunner(
             name: newName,
             repo: originalRunner.repo,
             labels: originalRunner.labels,
             isolationMode: originalRunner.isolationMode,
-            enableGUI: originalRunner.enableGUI
+            enableGUI: originalRunner.enableGUI,
+            openFileLimit: originalRunner.openFileLimit
         )
     }
 
@@ -735,6 +747,7 @@ class RunnerManager: ObservableObject {
     ///   - count: Number of instances to create (must be >= 1)
     ///   - isolationMode: Optional isolation mode override
     ///   - enableGUI: Whether to enable GUI access
+    ///   - openFileLimit: Optional max open file override
     ///   - onProgress: Called after each runner is created with (completed, total)
     /// - Throws: RunnerError if validation or setup fails for any runner
     func addRunners(
@@ -744,6 +757,7 @@ class RunnerManager: ObservableObject {
         count: Int,
         isolationMode: IsolationMode? = nil,
         enableGUI: Bool = false,
+        openFileLimit: Int? = nil,
         onProgress: ((Int, Int) -> Void)? = nil
     ) async throws {
         guard count >= 1 else { return }
@@ -755,7 +769,8 @@ class RunnerManager: ObservableObject {
                 repo: repo,
                 labels: labels,
                 isolationMode: isolationMode,
-                enableGUI: enableGUI
+                enableGUI: enableGUI,
+                openFileLimit: openFileLimit
             )
             onProgress?(1, 1)
             return
@@ -786,7 +801,8 @@ class RunnerManager: ObservableObject {
                     repo: repo,
                     labels: labels,
                     isolationMode: isolationMode,
-                    enableGUI: enableGUI
+                    enableGUI: enableGUI,
+                    openFileLimit: openFileLimit
                 )
             } catch {
                 errors.append((name: name, error: error))

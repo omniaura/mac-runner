@@ -9,6 +9,7 @@ struct AddRunnerView: View {
     @State private var labelsText = "macos, mac-runner"
     @State private var selectedIsolation: IsolationSelection = .global
     @State private var enableGUI = false
+    @State private var openFileLimitText = ""
     @State private var repoSections: [(header: String, repos: [String])] = []
     @State private var repoSearchText = ""
     @State private var isLoadingRepos = false
@@ -214,6 +215,19 @@ struct AddRunnerView: View {
                         }
                     }
 
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Open Files Limit")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        TextField("Global default (optional)", text: $openFileLimitText)
+                            .textFieldStyle(.roundedBorder)
+
+                        Text("Leave blank to inherit the global setting.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
                     // Number of Instances
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Number of Instances")
@@ -286,7 +300,7 @@ struct AddRunnerView: View {
             }
             .padding()
         }
-        .frame(width: 400, height: 560)
+        .frame(width: 400, height: 620)
     }
 
     private func loadRepos() async {
@@ -330,6 +344,17 @@ struct AddRunnerView: View {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
+        let trimmedOpenFileLimit = openFileLimitText.trimmingCharacters(in: .whitespaces)
+        let openFileLimit: Int?
+        if trimmedOpenFileLimit.isEmpty {
+            openFileLimit = nil
+        } else if let parsed = Int(trimmedOpenFileLimit), parsed > 0 {
+            openFileLimit = parsed
+        } else {
+            errorMessage = "Open files limit must be a positive integer."
+            return
+        }
+
         do {
             try await runnerManager.addRunners(
                 baseName: baseName,
@@ -338,6 +363,7 @@ struct AddRunnerView: View {
                 count: numberOfInstances,
                 isolationMode: selectedIsolation.isolationMode,
                 enableGUI: enableGUI,
+                openFileLimit: openFileLimit,
                 onProgress: { current, total in
                     addingProgress = (current: current, total: total)
                 }

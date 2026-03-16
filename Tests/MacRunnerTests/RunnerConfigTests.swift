@@ -12,12 +12,13 @@ final class RunnerConfigTests: XCTestCase {
         XCTAssertEqual(config.runners.count, 0)
         XCTAssertEqual(config.settings.isolationMode, .none)
         XCTAssertEqual(config.settings.startOnLogin, false)
+        XCTAssertEqual(config.settings.openFileLimit, ResourceLimits.defaultOpenFileLimit)
     }
 
     func testRunnerConfigCustomInitialization() {
         let runner1 = Runner(name: "runner1", repo: "owner/repo1")
-        let runner2 = Runner(name: "runner2", repo: "owner/repo2", isolationMode: .container)
-        let settings = AppSettings(isolationMode: .dedicatedUser(username: "_macrunner"))
+        let runner2 = Runner(name: "runner2", repo: "owner/repo2", isolationMode: .container, openFileLimit: 32768)
+        let settings = AppSettings(isolationMode: .dedicatedUser(username: "_macrunner"), openFileLimit: 131072)
 
         let config = RunnerConfig(
             runners: [runner1, runner2],
@@ -28,7 +29,9 @@ final class RunnerConfigTests: XCTestCase {
         XCTAssertEqual(config.runners[0].name, "runner1")
         XCTAssertEqual(config.runners[1].name, "runner2")
         XCTAssertEqual(config.runners[1].isolationMode, .container)
+        XCTAssertEqual(config.runners[1].openFileLimit, 32768)
         XCTAssertEqual(config.settings.isolationMode, .dedicatedUser(username: "_macrunner"))
+        XCTAssertEqual(config.settings.openFileLimit, 131072)
     }
 
     // MARK: - Coding Tests
@@ -38,7 +41,8 @@ final class RunnerConfigTests: XCTestCase {
             name: "macos-runner",
             repo: "owner/repo1",
             labels: ["macos"],
-            isolationMode: .dedicatedUser(username: "_runner1")
+            isolationMode: .dedicatedUser(username: "_runner1"),
+            openFileLimit: 32768
         )
         let runner2 = Runner(
             name: "linux-runner",
@@ -55,7 +59,7 @@ final class RunnerConfigTests: XCTestCase {
 
         let config = RunnerConfig(
             runners: [runner1, runner2, runner3],
-            settings: AppSettings(isolationMode: .none)
+            settings: AppSettings(isolationMode: .none, openFileLimit: 131072)
         )
 
         let encoder = JSONEncoder()
@@ -75,6 +79,7 @@ final class RunnerConfigTests: XCTestCase {
         let settings = json?["settings"] as? [String: Any]
         let isolationMode = settings?["isolationMode"] as? [String: Any]
         XCTAssertEqual(isolationMode?["type"] as? String, "none")
+        XCTAssertEqual(settings?["openFileLimit"] as? Int, 131072)
     }
 
     func testRunnerConfigDecodingWithMixedIsolation() throws {
@@ -89,6 +94,7 @@ final class RunnerConfigTests: XCTestCase {
                     "enabled": true,
                     "status": "running",
                     "busy": false,
+                    "openFileLimit": 32768,
                     "isolationMode": {
                         "type": "dedicatedUser",
                         "username": "_runner1"
@@ -119,6 +125,7 @@ final class RunnerConfigTests: XCTestCase {
             "settings": {
                 "startOnLogin": false,
                 "pauseOnBattery": false,
+                "openFileLimit": 131072,
                 "isolationMode": {
                     "type": "none"
                 }
@@ -138,6 +145,7 @@ final class RunnerConfigTests: XCTestCase {
         } else {
             XCTFail("Expected dedicatedUser isolation mode")
         }
+        XCTAssertEqual(config.runners[0].openFileLimit, 32768)
 
         // Second runner: container isolation
         XCTAssertEqual(config.runners[1].name, "linux-runner")
@@ -149,6 +157,7 @@ final class RunnerConfigTests: XCTestCase {
 
         // Global settings
         XCTAssertEqual(config.settings.isolationMode, .none)
+        XCTAssertEqual(config.settings.openFileLimit, 131072)
     }
 
     func testRunnerConfigBackwardCompatibility() throws {
@@ -179,7 +188,9 @@ final class RunnerConfigTests: XCTestCase {
         XCTAssertEqual(config.runners[0].name, "legacy-runner")
         XCTAssertNil(config.runners[0].isolationMode)  // Default
         XCTAssertEqual(config.runners[0].busy, false)  // Default
+        XCTAssertNil(config.runners[0].openFileLimit)  // Default
         XCTAssertEqual(config.settings.isolationMode, .none)  // Default
+        XCTAssertEqual(config.settings.openFileLimit, ResourceLimits.defaultOpenFileLimit)  // Default
     }
 
     // MARK: - Round-trip Tests
@@ -192,7 +203,8 @@ final class RunnerConfigTests: XCTestCase {
             enabled: true,
             status: .running,
             busy: true,
-            isolationMode: .container
+            isolationMode: .container,
+            openFileLimit: 32768
         )
 
         let originalConfig = RunnerConfig(
@@ -200,7 +212,8 @@ final class RunnerConfigTests: XCTestCase {
             settings: AppSettings(
                 startOnLogin: true,
                 pauseOnBattery: false,
-                isolationMode: .dedicatedUser(username: "_macrunner")
+                isolationMode: .dedicatedUser(username: "_macrunner"),
+                openFileLimit: 131072
             )
         )
 
@@ -221,9 +234,11 @@ final class RunnerConfigTests: XCTestCase {
         XCTAssertEqual(decodedConfig.runners[0].status, originalRunner.status)
         XCTAssertEqual(decodedConfig.runners[0].busy, originalRunner.busy)
         XCTAssertEqual(decodedConfig.runners[0].isolationMode, originalRunner.isolationMode)
+        XCTAssertEqual(decodedConfig.runners[0].openFileLimit, originalRunner.openFileLimit)
 
         XCTAssertEqual(decodedConfig.settings.startOnLogin, originalConfig.settings.startOnLogin)
         XCTAssertEqual(decodedConfig.settings.pauseOnBattery, originalConfig.settings.pauseOnBattery)
         XCTAssertEqual(decodedConfig.settings.isolationMode, originalConfig.settings.isolationMode)
+        XCTAssertEqual(decodedConfig.settings.openFileLimit, originalConfig.settings.openFileLimit)
     }
 }

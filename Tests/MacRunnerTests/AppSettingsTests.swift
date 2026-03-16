@@ -15,6 +15,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.isolationMode, .none)
         XCTAssertEqual(settings.autoRestartEnabled, true)
         XCTAssertEqual(settings.autoRestartMaxRetries, 5)
+        XCTAssertEqual(settings.openFileLimit, ResourceLimits.defaultOpenFileLimit)
     }
 
     func testAppSettingsCustomInitialization() {
@@ -24,7 +25,8 @@ final class AppSettingsTests: XCTestCase {
             quietHours: QuietHours(enabled: true, start: "22:00", end: "08:00"),
             isolationMode: .dedicatedUser(username: "_testrunner"),
             autoRestartEnabled: false,
-            autoRestartMaxRetries: 8
+            autoRestartMaxRetries: 8,
+            openFileLimit: 32768
         )
 
         XCTAssertEqual(settings.startOnLogin, true)
@@ -34,6 +36,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.isolationMode, .dedicatedUser(username: "_testrunner"))
         XCTAssertEqual(settings.autoRestartEnabled, false)
         XCTAssertEqual(settings.autoRestartMaxRetries, 8)
+        XCTAssertEqual(settings.openFileLimit, 32768)
     }
 
     // MARK: - Coding Tests
@@ -45,7 +48,8 @@ final class AppSettingsTests: XCTestCase {
             quietHours: QuietHours(enabled: true, start: "23:00", end: "07:00"),
             isolationMode: .container,
             autoRestartEnabled: false,
-            autoRestartMaxRetries: 12
+            autoRestartMaxRetries: 12,
+            openFileLimit: 131072
         )
 
         let encoder = JSONEncoder()
@@ -57,6 +61,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(json?["pauseOnBattery"] as? Bool, false)
         XCTAssertEqual(json?["autoRestartEnabled"] as? Bool, false)
         XCTAssertEqual(json?["autoRestartMaxRetries"] as? Int, 12)
+        XCTAssertEqual(json?["openFileLimit"] as? Int, 131072)
 
         let isolationModeData = json?["isolationMode"] as? [String: Any]
         XCTAssertEqual(isolationModeData?["type"] as? String, "container")
@@ -79,6 +84,7 @@ final class AppSettingsTests: XCTestCase {
             },
             "autoRestartEnabled": true,
             "autoRestartMaxRetries": 9,
+            "openFileLimit": 32768,
             "isolationMode": {
                 "type": "dedicatedUser",
                 "username": "_macrunner"
@@ -98,6 +104,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.isolationMode, .dedicatedUser(username: "_macrunner"))
         XCTAssertEqual(settings.autoRestartEnabled, true)
         XCTAssertEqual(settings.autoRestartMaxRetries, 9)
+        XCTAssertEqual(settings.openFileLimit, 32768)
     }
 
     func testAppSettingsBackwardCompatibility() throws {
@@ -118,6 +125,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.isolationMode, .none)  // Default value
         XCTAssertEqual(settings.autoRestartEnabled, true)
         XCTAssertEqual(settings.autoRestartMaxRetries, 5)
+        XCTAssertEqual(settings.openFileLimit, ResourceLimits.defaultOpenFileLimit)
     }
 
     func testAppSettingsMinimalConfig() throws {
@@ -135,6 +143,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.isolationMode, .none)
         XCTAssertEqual(settings.autoRestartEnabled, true)
         XCTAssertEqual(settings.autoRestartMaxRetries, 5)
+        XCTAssertEqual(settings.openFileLimit, ResourceLimits.defaultOpenFileLimit)
     }
 
     // MARK: - Quiet Hours Tests
