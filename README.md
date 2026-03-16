@@ -30,8 +30,7 @@ GitHub Actions self-hosted runners are great, but:
 ### Homebrew
 
 ```bash
-brew tap omniaura/tap https://github.com/omniaura/mac-runner
-brew install --cask mac-runner
+brew install --cask omniaura/tap/mac-runner
 ```
 
 ### Direct Download

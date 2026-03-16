@@ -164,7 +164,7 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          IDENTITY="Developer ID Application: OmniAura Inc. ($APPLE_TEAM_ID)"
+          IDENTITY="Developer ID Application: Omni Aura LLC ($APPLE_TEAM_ID)"
 
           echo "Signing the binary..."
           codesign --force --options runtime \
@@ -251,7 +251,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
         run: |
-          IDENTITY="Developer ID Application: OmniAura Inc. ($APPLE_TEAM_ID)"
+          IDENTITY="Developer ID Application: Omni Aura LLC ($APPLE_TEAM_ID)"
 
           echo "Signing DMG..."
           codesign --force --sign "$IDENTITY" --timestamp "build/MacRunner-${VERSION}.dmg"
