@@ -37,11 +37,25 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Reset SwiftPM state
+        run: |
+          rm -rf .build
+          rm -f Package.resolved
+          rm -rf ~/Library/Caches/org.swift.swiftpm
+          rm -rf ~/.swiftpm/cache
+          swift package reset
+
       - name: Resolve dependencies
-        run: swift package resolve
+        run: |
+          ulimit -n 65536 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
+          swift package resolve
 
       - name: Build
-        run: swift build --disable-sandbox
+        run: |
+          ulimit -n 65536 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
+          swift build --disable-sandbox
 
       - name: Test
-        run: swift test --disable-sandbox
+        run: |
+          ulimit -n 65536 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
+          swift test --disable-sandbox

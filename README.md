@@ -30,23 +30,12 @@ GitHub Actions self-hosted runners are great, but:
 ### Homebrew
 
 ```bash
-brew tap omniaura/tap https://github.com/omniaura/mac-runner
-brew install --cask mac-runner
+brew install --cask omniaura/tap/mac-runner
 ```
 
 ### Direct Download
 
 Download the latest DMG from [Releases](https://github.com/omniaura/mac-runner/releases)
-
-### Unsigned Binary
-
-Mac Runner is not code-signed yet. macOS Gatekeeper will block the first launch. To allow it:
-
-```bash
-xattr -cr /Applications/MacRunner.app
-```
-
-Or: right-click the app → Open → click "Open" in the dialog.
 
 ### Prerequisites
 
@@ -58,7 +47,7 @@ Or: right-click the app → Open → click "Open" in the dialog.
 
 ### GUI
 
-1. Launch Mac Runner — appears in menu bar
+1. Launch Mac Runner from Applications or run `open /Applications/MacRunner.app` — it appears in the menu bar
 2. Click "Add Runner"
 3. Browse your repos (fetched via `gh`), pick one
 4. Runner downloads, configures, registers, and starts automatically

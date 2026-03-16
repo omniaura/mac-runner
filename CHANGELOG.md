@@ -1,3 +1,37 @@
+## [1.10.2](https://github.com/omniaura/mac-runner/compare/v1.10.1...v1.10.2) (2026-03-16)
+
+
+### Bug Fixes
+
+* pin release runs to their triggering commit ([#58](https://github.com/omniaura/mac-runner/issues/58)) ([4d3dbd8](https://github.com/omniaura/mac-runner/commit/4d3dbd88663cc1c4e57583c347a3fa6207376416))
+
+## [1.10.1](https://github.com/omniaura/mac-runner/compare/v1.10.0...v1.10.1) (2026-03-16)
+
+
+### Bug Fixes
+
+* clean up macOS startup and launch guidance ([#56](https://github.com/omniaura/mac-runner/issues/56)) ([0b1169a](https://github.com/omniaura/mac-runner/commit/0b1169a6e4bdfb04b2b9fc04e26cb916cb6766c6))
+* reconcile Launch at Login checkbox with macOS system state ([#57](https://github.com/omniaura/mac-runner/issues/57)) ([2da139f](https://github.com/omniaura/mac-runner/commit/2da139fa13fe40fbf478d81392745945ce2aa125))
+
+# [1.10.0](https://github.com/omniaura/mac-runner/compare/v1.9.0...v1.10.0) (2026-03-16)
+
+
+### Bug Fixes
+
+* correct signing identity name and simplify Homebrew install ([3cb33f4](https://github.com/omniaura/mac-runner/commit/3cb33f4a1c9124c9760b316d2b57672799a1cfcd))
+
+
+### Features
+
+* add code signing and notarization to release workflow ([#55](https://github.com/omniaura/mac-runner/issues/55)) ([da50fc2](https://github.com/omniaura/mac-runner/commit/da50fc2abdf47cdd143bb299ced56460d0374e2a))
+
+# [1.9.0](https://github.com/omniaura/mac-runner/compare/v1.8.1...v1.9.0) (2026-03-16)
+
+
+### Features
+
+* group runners by org/repo in menubar dropdown ([#49](https://github.com/omniaura/mac-runner/issues/49)) ([222633d](https://github.com/omniaura/mac-runner/commit/222633d80e7474611fb533d17693ce4bab977a40)), closes [#19](https://github.com/omniaura/mac-runner/issues/19)
+
 ## [1.8.1](https://github.com/omniaura/mac-runner/compare/v1.8.0...v1.8.1) (2026-03-04)
 
 

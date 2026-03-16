@@ -3,6 +3,23 @@ import Foundation
 enum SetupWizard {
     nonisolated(unsafe) private static let isolationService = UserIsolationService.shared
 
+    static func detectedIsolationUsername(
+        configuredIsolationMode: IsolationMode,
+        defaultUsername: String = IsolationMode.defaultUsername,
+        userExists: (String) -> Bool,
+        hasSudoersEntry: () -> Bool
+    ) -> String? {
+        if case .dedicatedUser(let username) = configuredIsolationMode {
+            return username
+        }
+
+        if userExists(defaultUsername) || hasSudoersEntry() {
+            return defaultUsername
+        }
+
+        return nil
+    }
+
     // MARK: - Setup
 
     @MainActor
@@ -47,6 +64,14 @@ enum SetupWizard {
         guard let response = readLine()?.trimmingCharacters(in: .whitespaces).lowercased(),
               response == "y" || response == "yes" else {
             print("Setup cancelled.")
+            return
+        }
+
+        print("Requesting administrator access...")
+        do {
+            try isolationService.authenticateAdministratorAccess()
+        } catch {
+            print("Error: \(error.localizedDescription)")
             return
         }
 
@@ -130,9 +155,21 @@ enum SetupWizard {
             return
         }
 
-        guard case .dedicatedUser(let username) = config.settings.isolationMode else {
+        guard let username = detectedIsolationUsername(
+            configuredIsolationMode: config.settings.isolationMode,
+            userExists: isolationService.userExists,
+            hasSudoersEntry: isolationService.hasSudoersEntry
+        ) else {
             print("Isolation is not currently enabled.")
             return
+        }
+
+        if case .dedicatedUser = config.settings.isolationMode {
+            // Config and system state agree; no extra note needed.
+        } else {
+            print("Found existing isolation artifacts for '\(username)' even though config is not enabled.")
+            print("Continuing with teardown cleanup.")
+            print("")
         }
 
         // Check for running runners
@@ -159,6 +196,14 @@ enum SetupWizard {
         guard let response = readLine()?.trimmingCharacters(in: .whitespaces).lowercased(),
               response == "y" || response == "yes" else {
             print("Teardown cancelled.")
+            return
+        }
+
+        print("Requesting administrator access...")
+        do {
+            try isolationService.authenticateAdministratorAccess()
+        } catch {
+            print("Error: \(error.localizedDescription)")
             return
         }
 

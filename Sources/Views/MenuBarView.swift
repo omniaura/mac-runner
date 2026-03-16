@@ -69,15 +69,48 @@ struct MenuBarView: View {
         .frame(maxHeight: .infinity)
     }
 
+    /// Runners grouped by repo ("owner/repo"), sorted alphabetically by repo then by runner name.
+    private var groupedRunners: [(repo: String, runners: [Runner])] {
+        let grouped = Dictionary(grouping: runnerManager.runners) { $0.repo }
+        return grouped
+            .map { (repo: $0.key, runners: $0.value.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) }
+            .sorted { $0.repo.localizedCaseInsensitiveCompare($1.repo) == .orderedAscending }
+    }
+
     private var runnerList: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(runnerManager.runners) { runner in
-                    RunnerRow(runner: runner)
-                        .environmentObject(runnerManager)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(groupedRunners, id: \.repo) { group in
+                    // Section header
+                    HStack(spacing: 4) {
+                        Image(systemName: "folder")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text(group.repo)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(group.runners.count)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(Color.gray.opacity(0.2))
+                            .cornerRadius(4)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    .padding(.bottom, 2)
+
+                    ForEach(group.runners) { runner in
+                        RunnerRow(runner: runner)
+                            .environmentObject(runnerManager)
+                    }
                 }
             }
-            .padding()
+            .padding(.vertical)
+            .padding(.horizontal, 4)
         }
     }
 

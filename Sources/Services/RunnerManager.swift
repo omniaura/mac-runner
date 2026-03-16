@@ -21,6 +21,7 @@ class RunnerManager: ObservableObject {
     private var _containerService: Any?  // ContainerIsolationService, but untyped for availability
     #endif
     private var containerServiceInitializationTask: Task<Void, Never>?
+    private var containerServiceInitializationError: Error?
 
     #if canImport(Containerization)
     @available(macOS 26, *)
@@ -78,11 +79,17 @@ class RunnerManager: ObservableObject {
                 return
             }
             let macRunnerDir = appSupport.appendingPathComponent("MacRunner", isDirectory: true)
-
-            // Kernel path (will need to be provided/downloaded)
-            // For now, use a placeholder - this will be implemented in Phase 5
-            let kernelPath = macRunnerDir.appendingPathComponent("vmlinux")
             let imageStorePath = macRunnerDir.appendingPathComponent("images")
+
+            guard let kernelPath = Self.preferredKernelPath(
+                bundleResourceURL: Bundle.main.resourceURL,
+                applicationSupportURL: macRunnerDir
+            ) else {
+                containerServiceInitializationError = ContainerIsolationError.kernelNotFound(
+                    macRunnerDir.appendingPathComponent("vmlinux")
+                )
+                return
+            }
 
             let service = ContainerIsolationService(
                 kernelPath: kernelPath,
@@ -95,14 +102,32 @@ class RunnerManager: ObservableObject {
                     try await service.initialize()
                     await MainActor.run {
                         self.containerService = service
+                        self.containerServiceInitializationError = nil
                     }
                 } catch {
-                    print("Container isolation not available: \(error.localizedDescription)")
+                    await MainActor.run {
+                        self.containerServiceInitializationError = error
+                    }
                 }
             }
         }
         #endif
     }
+
+    #if canImport(Containerization)
+    nonisolated static func preferredKernelPath(
+        bundleResourceURL: URL?,
+        applicationSupportURL: URL,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> URL? {
+        let candidates = [
+            bundleResourceURL?.appendingPathComponent("vmlinux"),
+            applicationSupportURL.appendingPathComponent("vmlinux")
+        ].compactMap { $0 }
+
+        return candidates.first { fileExists($0.path) }
+    }
+    #endif
 
     deinit {
         statusPollingTask?.cancel()
@@ -159,9 +184,18 @@ class RunnerManager: ObservableObject {
 
     /// Synchronize the macOS login item registration with current settings.
     ///
-    /// Registers or unregisters the app as a login item based on the startOnLogin setting.
+    /// First reconciles the config with the actual OS state (in case the user toggled
+    /// the login item via System Settings), then registers or unregisters as needed.
     private func syncLoginItem() {
         let service = SMAppService.mainApp
+        let osEnabled = service.status == .enabled
+
+        // Reconcile: if OS state disagrees with config, trust the OS
+        if currentSettings.startOnLogin != osEnabled {
+            currentSettings.startOnLogin = osEnabled
+            saveConfiguration()
+        }
+
         do {
             if currentSettings.startOnLogin {
                 if service.status != .enabled {
@@ -353,6 +387,9 @@ class RunnerManager: ObservableObject {
                 }
 
                 guard let containerService = containerService else {
+                    if let initializationError = containerServiceInitializationError {
+                        throw initializationError
+                    }
                     throw RunnerError.containerServiceNotAvailable
                 }
 
