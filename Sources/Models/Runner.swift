@@ -11,6 +11,7 @@ struct Runner: Identifiable, Codable, Sendable {
     var busy: Bool  // Whether runner is currently executing a job
     var isolationMode: IsolationMode?  // Per-runner isolation override (nil = use global setting)
     var enableGUI: Bool  // Whether to enable GUI access for this runner (default: false, headless)
+    var lastRestartEvent: String?
     var openFileLimit: Int?  // Per-runner override for max open files (nil = use global setting)
 
     init(
@@ -24,6 +25,7 @@ struct Runner: Identifiable, Codable, Sendable {
         busy: Bool = false,
         isolationMode: IsolationMode? = nil,
         enableGUI: Bool = false,
+        lastRestartEvent: String? = nil,
         openFileLimit: Int? = nil
     ) {
         self.id = id
@@ -36,6 +38,7 @@ struct Runner: Identifiable, Codable, Sendable {
         self.busy = busy
         self.isolationMode = isolationMode
         self.enableGUI = enableGUI
+        self.lastRestartEvent = lastRestartEvent
         self.openFileLimit = ResourceLimits.normalizedOpenFileLimit(openFileLimit)
     }
 
@@ -54,6 +57,8 @@ struct Runner: Identifiable, Codable, Sendable {
         isolationMode = try container.decodeIfPresent(IsolationMode.self, forKey: .isolationMode)
         // Default GUI access to false (headless) for backward compatibility
         enableGUI = try container.decodeIfPresent(Bool.self, forKey: .enableGUI) ?? false
+        // Default restart event to nil for backward compatibility
+        lastRestartEvent = try container.decodeIfPresent(String.self, forKey: .lastRestartEvent)
         openFileLimit = ResourceLimits.normalizedOpenFileLimit(
             try container.decodeIfPresent(Int.self, forKey: .openFileLimit)
         )
@@ -178,6 +183,8 @@ struct AppSettings: Codable, Sendable {
     var pauseOnBattery: Bool
     var quietHours: QuietHours?
     var isolationMode: IsolationMode
+    var autoRestartEnabled: Bool
+    var autoRestartMaxRetries: Int
     var openFileLimit: Int
 
     static let `default` = AppSettings(
@@ -185,6 +192,8 @@ struct AppSettings: Codable, Sendable {
         pauseOnBattery: false,
         quietHours: nil,
         isolationMode: .none,
+        autoRestartEnabled: true,
+        autoRestartMaxRetries: 5,
         openFileLimit: ResourceLimits.defaultOpenFileLimit
     )
 
@@ -193,12 +202,16 @@ struct AppSettings: Codable, Sendable {
         pauseOnBattery: Bool = false,
         quietHours: QuietHours? = nil,
         isolationMode: IsolationMode = .none,
+        autoRestartEnabled: Bool = true,
+        autoRestartMaxRetries: Int = 5,
         openFileLimit: Int = ResourceLimits.defaultOpenFileLimit
     ) {
         self.startOnLogin = startOnLogin
         self.pauseOnBattery = pauseOnBattery
         self.quietHours = quietHours
         self.isolationMode = isolationMode
+        self.autoRestartEnabled = autoRestartEnabled
+        self.autoRestartMaxRetries = max(1, autoRestartMaxRetries)
         self.openFileLimit = ResourceLimits.normalizedOpenFileLimit(openFileLimit) ?? ResourceLimits.defaultOpenFileLimit
     }
 
@@ -208,6 +221,8 @@ struct AppSettings: Codable, Sendable {
         pauseOnBattery = try container.decodeIfPresent(Bool.self, forKey: .pauseOnBattery) ?? false
         quietHours = try container.decodeIfPresent(QuietHours.self, forKey: .quietHours)
         isolationMode = try container.decodeIfPresent(IsolationMode.self, forKey: .isolationMode) ?? .none
+        autoRestartEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoRestartEnabled) ?? true
+        autoRestartMaxRetries = max(1, try container.decodeIfPresent(Int.self, forKey: .autoRestartMaxRetries) ?? 5)
         openFileLimit = ResourceLimits.normalizedOpenFileLimit(
             try container.decodeIfPresent(Int.self, forKey: .openFileLimit)
         ) ?? ResourceLimits.defaultOpenFileLimit
