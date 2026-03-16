@@ -40,6 +40,7 @@ class RunnerManager: ObservableObject {
     private var manualStopRequests: Set<UUID> = []
     private var restartAttemptHistory: [UUID: [Date]] = [:]
     private var scheduledRestarts: [UUID: Task<Void, Never>] = [:]
+    private var launchTokens: [UUID: UUID] = [:]
     private let restartWindowSeconds: TimeInterval = 600
     private let restartBaseDelaySeconds = 5
     private let restartMaxDelaySeconds = 60
@@ -173,7 +174,12 @@ class RunnerManager: ObservableObject {
     /// - Parameter settings: New application settings to apply
     func updateSettings(_ settings: AppSettings) {
         let loginChanged = settings.startOnLogin != currentSettings.startOnLogin
+        let autoRestartDisabled = currentSettings.autoRestartEnabled && !settings.autoRestartEnabled
+        objectWillChange.send()
         currentSettings = settings
+        if autoRestartDisabled {
+            cancelScheduledRestarts(clearHistory: false)
+        }
         saveConfiguration()
         if loginChanged {
             syncLoginItem()
@@ -323,6 +329,7 @@ class RunnerManager: ObservableObject {
         // Clean up PID file
         pidManager.removePID(for: id)
         manualStopRequests.remove(id)
+        launchTokens.removeValue(forKey: id)
         scheduledRestarts[id]?.cancel()
         scheduledRestarts.removeValue(forKey: id)
         restartAttemptHistory.removeValue(forKey: id)
@@ -352,6 +359,7 @@ class RunnerManager: ObservableObject {
 
         scheduledRestarts[id]?.cancel()
         scheduledRestarts.removeValue(forKey: id)
+        let launchToken = UUID()
 
         let runner = runners[index]
         // Use per-runner isolation mode if specified, otherwise use global setting
@@ -417,6 +425,7 @@ class RunnerManager: ObservableObject {
 
                 // Store container reference
                 runnerContainers[id] = container
+                launchTokens[id] = launchToken
 
                 // Monitor container in background
                 Task {
@@ -426,17 +435,17 @@ class RunnerManager: ObservableObject {
                             let exitStatus = try await linuxContainer.wait()
                             print("Container \(id.uuidString) exited with code: \(exitStatus.exitCode)")
                             await MainActor.run {
-                                handleRunnerTermination(id, cause: .containerExit(status: Int(exitStatus.exitCode)))
+                                handleRunnerTermination(id, launchToken: launchToken, cause: .containerExit(status: Int(exitStatus.exitCode)))
                             }
                         } else {
                             await MainActor.run {
-                                handleRunnerTermination(id, cause: .monitoringError(message: "Container handle unavailable"))
+                                handleRunnerTermination(id, launchToken: launchToken, cause: .monitoringError(message: "Container handle unavailable"))
                             }
                         }
                         #endif
                     } catch {
                         await MainActor.run {
-                            handleRunnerTermination(id, cause: .monitoringError(message: error.localizedDescription))
+                            handleRunnerTermination(id, launchToken: launchToken, cause: .monitoringError(message: error.localizedDescription))
                         }
                     }
                 }
@@ -459,11 +468,13 @@ class RunnerManager: ObservableObject {
 
             // Store process reference for in-memory tracking (GUI)
             runnerProcesses[id] = process
+            launchTokens[id] = launchToken
 
             process.terminationHandler = { [weak self] terminatedProcess in
                 Task { @MainActor [weak self] in
                     self?.handleRunnerTermination(
                         id,
+                        launchToken: launchToken,
                         cause: .process(
                             reason: terminatedProcess.terminationReason,
                             status: terminatedProcess.terminationStatus
@@ -533,6 +544,7 @@ class RunnerManager: ObservableObject {
         scheduledRestarts[id]?.cancel()
         scheduledRestarts.removeValue(forKey: id)
         restartAttemptHistory.removeValue(forKey: id)
+        launchTokens.removeValue(forKey: id)
 
         runners[index].status = .stopped
         runners[index].lastRestartEvent = nil
@@ -821,7 +833,10 @@ class RunnerManager: ObservableObject {
     }
 
     /// Handle cleanup when a runner process/container terminates.
-    private func handleRunnerTermination(_ id: UUID, cause: RunnerTerminationCause) {
+    private func handleRunnerTermination(_ id: UUID, launchToken: UUID, cause: RunnerTerminationCause) {
+        guard launchTokens[id] == launchToken else { return }
+
+        launchTokens.removeValue(forKey: id)
         runnerProcesses.removeValue(forKey: id)
         runnerContainers.removeValue(forKey: id)
         pidManager.removePID(for: id)
@@ -835,8 +850,6 @@ class RunnerManager: ObservableObject {
                     return
                 }
                 runners[index].status = .error
-                runners[index].lastRestartEvent = "Runner crashed (\(cause.description)); auto-restart stopped."
-                logRunnerEvent(for: runners[index], message: runners[index].lastRestartEvent ?? "")
             } else {
                 runners[index].status = .stopped
                 if wasManualStop {
@@ -849,14 +862,15 @@ class RunnerManager: ObservableObject {
 
     private func scheduleAutoRestart(for id: UUID, cause: RunnerTerminationCause, runnerIndex: Int) -> Bool {
         guard currentSettings.autoRestartEnabled else {
+            scheduledRestarts[id]?.cancel()
+            scheduledRestarts.removeValue(forKey: id)
             runners[runnerIndex].lastRestartEvent = "Runner crashed (\(cause.description)); auto-restart disabled."
             logRunnerEvent(for: runners[runnerIndex], message: runners[runnerIndex].lastRestartEvent ?? "")
             return false
         }
 
         let now = Date()
-        let cutoff = now.addingTimeInterval(-restartWindowSeconds)
-        var attempts = restartAttemptHistory[id, default: []].filter { $0 >= cutoff }
+        var attempts = filteredRestartAttempts(for: id, now: now)
         let maxRetries = max(1, currentSettings.autoRestartMaxRetries)
 
         guard attempts.count < maxRetries else {
@@ -894,7 +908,18 @@ class RunnerManager: ObservableObject {
     private func performScheduledRestart(for id: UUID) async {
         defer { scheduledRestarts.removeValue(forKey: id) }
 
-        guard runners.contains(where: { $0.id == id }) else { return }
+        guard let runnerIndex = runners.firstIndex(where: { $0.id == id }) else { return }
+        guard currentSettings.autoRestartEnabled else { return }
+        guard runners[runnerIndex].status != .running else { return }
+
+        let attempts = filteredRestartAttempts(for: id, now: Date())
+        guard attempts.count <= max(1, currentSettings.autoRestartMaxRetries) else {
+            runners[runnerIndex].status = .error
+            runners[runnerIndex].lastRestartEvent = "Runner crashed; pending auto-restart cancelled after settings changed."
+            logRunnerEvent(for: runners[runnerIndex], message: runners[runnerIndex].lastRestartEvent ?? "")
+            saveConfiguration()
+            return
+        }
 
         do {
             try await startRunner(id)
@@ -911,6 +936,23 @@ class RunnerManager: ObservableObject {
                 saveConfiguration()
             }
         }
+    }
+
+    private func filteredRestartAttempts(for id: UUID, now: Date) -> [Date] {
+        let cutoff = now.addingTimeInterval(-restartWindowSeconds)
+        let attempts = restartAttemptHistory[id, default: []].filter { $0 >= cutoff }
+        restartAttemptHistory[id] = attempts
+        return attempts
+    }
+
+    private func cancelScheduledRestarts(clearHistory: Bool) {
+        for (id, task) in scheduledRestarts {
+            task.cancel()
+            if clearHistory {
+                restartAttemptHistory.removeValue(forKey: id)
+            }
+        }
+        scheduledRestarts.removeAll()
     }
 
     private func logRunnerEvent(for runner: Runner, message: String) {
