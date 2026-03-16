@@ -89,4 +89,16 @@ final class MacRunnerTests: XCTestCase {
 
         XCTAssertNil(username)
     }
+
+    func testResourceLimitsShellCommandPrefixesUlimit() {
+        let command = ResourceLimits.shellCommand("exec '/tmp/run.sh'", openFileLimit: 32768)
+
+        XCTAssertTrue(command.contains("ulimit -n 32768"))
+        XCTAssertTrue(command.hasSuffix("exec '/tmp/run.sh'"))
+    }
+
+    func testResourceLimitsShellCommandSkipsInvalidLimits() {
+        XCTAssertEqual(ResourceLimits.shellCommand("echo test", openFileLimit: nil), "echo test")
+        XCTAssertEqual(ResourceLimits.shellCommand("echo test", openFileLimit: 0), "echo test")
+    }
 }

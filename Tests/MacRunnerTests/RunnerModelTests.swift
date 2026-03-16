@@ -11,13 +11,15 @@ final class RunnerModelTests: XCTestCase {
             name: "test-runner",
             repo: "owner/repo",
             labels: ["macos", "self-hosted"],
-            isolationMode: .container
+            isolationMode: .container,
+            openFileLimit: 32768
         )
 
         XCTAssertEqual(runner.name, "test-runner")
         XCTAssertEqual(runner.repo, "owner/repo")
         XCTAssertEqual(runner.labels, ["macos", "self-hosted"])
         XCTAssertEqual(runner.isolationMode, .container)
+        XCTAssertEqual(runner.openFileLimit, 32768)
         XCTAssertEqual(runner.enabled, true)
         XCTAssertEqual(runner.status, .stopped)
         XCTAssertEqual(runner.busy, false)
@@ -32,6 +34,7 @@ final class RunnerModelTests: XCTestCase {
 
         XCTAssertEqual(runner.labels, ["macos", "mac-runner"])
         XCTAssertNil(runner.isolationMode)
+        XCTAssertNil(runner.openFileLimit)
         XCTAssertEqual(runner.enabled, true)
         XCTAssertEqual(runner.status, .stopped)
         XCTAssertEqual(runner.busy, false)
@@ -49,7 +52,8 @@ final class RunnerModelTests: XCTestCase {
             status: .running,
             githubRunnerId: 12345,
             busy: true,
-            isolationMode: .container
+            isolationMode: .container,
+            openFileLimit: 32768
         )
 
         let encoder = JSONEncoder()
@@ -66,6 +70,7 @@ final class RunnerModelTests: XCTestCase {
         // Check isolation mode is encoded
         let isolationModeData = json?["isolationMode"] as? [String: Any]
         XCTAssertEqual(isolationModeData?["type"] as? String, "container")
+        XCTAssertEqual(json?["openFileLimit"] as? Int, 32768)
     }
 
     func testRunnerDecodingWithIsolationMode() throws {
@@ -79,6 +84,7 @@ final class RunnerModelTests: XCTestCase {
             "status": "running",
             "githubRunnerId": 12345,
             "busy": true,
+            "openFileLimit": 32768,
             "isolationMode": {
                 "type": "container"
             }
@@ -95,6 +101,7 @@ final class RunnerModelTests: XCTestCase {
         XCTAssertEqual(runner.status, .running)
         XCTAssertEqual(runner.githubRunnerId, 12345)
         XCTAssertEqual(runner.busy, true)
+        XCTAssertEqual(runner.openFileLimit, 32768)
         XCTAssertEqual(runner.isolationMode, .container)
     }
 
@@ -114,6 +121,7 @@ final class RunnerModelTests: XCTestCase {
         let runner = try decoder.decode(Runner.self, from: json)
 
         XCTAssertNil(runner.isolationMode)
+        XCTAssertNil(runner.openFileLimit)
         XCTAssertEqual(runner.busy, false)  // Default value for backward compatibility
     }
 
@@ -137,6 +145,7 @@ final class RunnerModelTests: XCTestCase {
         XCTAssertEqual(runner.name, "legacy-runner")
         XCTAssertEqual(runner.busy, false)  // Default
         XCTAssertNil(runner.isolationMode)  // Default
+        XCTAssertNil(runner.openFileLimit)  // Default
         XCTAssertEqual(runner.githubRunnerId, 999)
     }
 
@@ -181,6 +190,25 @@ final class RunnerModelTests: XCTestCase {
         let effective = runner.effectiveIsolationMode(global: globalMode)
 
         XCTAssertEqual(effective, .none)
+    }
+
+    func testEffectiveOpenFileLimitWithPerRunnerOverride() {
+        let runner = Runner(
+            name: "test-runner",
+            repo: "owner/repo",
+            openFileLimit: 32768
+        )
+
+        XCTAssertEqual(runner.effectiveOpenFileLimit(global: ResourceLimits.defaultOpenFileLimit), 32768)
+    }
+
+    func testEffectiveOpenFileLimitWithoutOverride() {
+        let runner = Runner(
+            name: "test-runner",
+            repo: "owner/repo"
+        )
+
+        XCTAssertEqual(runner.effectiveOpenFileLimit(global: 131072), 131072)
     }
 
     // MARK: - Runner Status Tests

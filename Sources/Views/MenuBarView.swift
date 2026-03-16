@@ -307,6 +307,13 @@ struct SettingsView: View {
     @State private var isAuthenticated = false
     @State private var authStatusText = "Checking..."
     @State private var isLoggingIn = false
+    private let openFileLimitFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimum = 1
+        formatter.maximumFractionDigits = 0
+        return formatter
+    }()
 
     var body: some View {
         TabView {
@@ -327,6 +334,26 @@ struct SettingsView: View {
                 Text("When enabled, Mac Runner starts automatically when you log in and restarts any runners that were previously running.")
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Default Open Files Limit")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+
+                    TextField("Open files limit", value: Binding(
+                        get: { runnerManager.currentSettings.openFileLimit },
+                        set: { newValue in
+                            var settings = runnerManager.currentSettings
+                            settings.openFileLimit = max(1, newValue)
+                            runnerManager.updateSettings(settings)
+                        }
+                    ), formatter: openFileLimitFormatter)
+                    .textFieldStyle(.roundedBorder)
+
+                    Text("Applied to runners by default across non-isolated, dedicated-user, and container modes unless a runner overrides it.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
 
                 Spacer()
             }

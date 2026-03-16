@@ -137,6 +137,7 @@ class ContainerIsolationService {
                 # Configure and start runner
                 cd /runner
                 ./config.sh --unattended --url \(config.repositoryURL) --token \(config.registrationToken)
+                ulimit -n \(config.openFileLimit) 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
                 ./run.sh
                 """
             ]
@@ -309,6 +310,9 @@ struct ContainerRunnerConfiguration {
 
     /// Registration token for the runner.
     var registrationToken: String
+
+    /// Maximum open file limit to set before starting the runner.
+    var openFileLimit: Int = ResourceLimits.defaultOpenFileLimit
 
     /// Default container image for GitHub Actions runners.
     static let defaultRunnerImage = "ghcr.io/actions/runner:latest"
