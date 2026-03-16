@@ -37,15 +37,6 @@ brew install --cask omniaura/tap/mac-runner
 
 Download the latest DMG from [Releases](https://github.com/omniaura/mac-runner/releases)
 
-### First Launch
-
-Current releases should open normally after install. If macOS warns about the app on first launch, clear the quarantine attribute and try again:
-
-```bash
-xattr -cr /Applications/MacRunner.app
-```
-
-You can also right-click the app in Applications and choose "Open".
 ### Prerequisites
 
 - macOS 13+ (macOS 15+ for user isolation, macOS 26+ for container isolation)

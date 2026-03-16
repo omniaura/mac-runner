@@ -25,10 +25,6 @@ cask "mac-runner" do
     3. Click the runner icon in the menu bar and add a runner
     4. Or use the CLI: mac-runner add owner/repo --name my-runner
 
-    If macOS warns on first launch, run:
-
-      xattr -cr /Applications/MacRunner.app
-
     For help: https://github.com/omniaura/mac-runner
   EOS
 end
