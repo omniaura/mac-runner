@@ -1,3 +1,15 @@
+# [1.10.0](https://github.com/omniaura/mac-runner/compare/v1.9.0...v1.10.0) (2026-03-16)
+
+
+### Bug Fixes
+
+* correct signing identity name and simplify Homebrew install ([3cb33f4](https://github.com/omniaura/mac-runner/commit/3cb33f4a1c9124c9760b316d2b57672799a1cfcd))
+
+
+### Features
+
+* add code signing and notarization to release workflow ([#55](https://github.com/omniaura/mac-runner/issues/55)) ([da50fc2](https://github.com/omniaura/mac-runner/commit/da50fc2abdf47cdd143bb299ced56460d0374e2a))
+
 # [1.9.0](https://github.com/omniaura/mac-runner/compare/v1.8.1...v1.9.0) (2026-03-16)
 
 
