@@ -1,3 +1,10 @@
+## [1.10.2](https://github.com/omniaura/mac-runner/compare/v1.10.1...v1.10.2) (2026-03-16)
+
+
+### Bug Fixes
+
+* pin release runs to their triggering commit ([#58](https://github.com/omniaura/mac-runner/issues/58)) ([4d3dbd8](https://github.com/omniaura/mac-runner/commit/4d3dbd88663cc1c4e57583c347a3fa6207376416))
+
 ## [1.10.1](https://github.com/omniaura/mac-runner/compare/v1.10.0...v1.10.1) (2026-03-16)
 
 
