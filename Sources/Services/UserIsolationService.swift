@@ -7,6 +7,7 @@ enum IsolationError: LocalizedError {
     case processLaunchFailed(String)
     case killFailed(String)
     case homeSetupFailed(String)
+    case authenticationFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -16,6 +17,7 @@ enum IsolationError: LocalizedError {
         case .processLaunchFailed(let msg): return "Failed to launch isolated process: \(msg)"
         case .killFailed(let msg): return "Failed to kill process: \(msg)"
         case .homeSetupFailed(let msg): return "Failed to set up home directory: \(msg)"
+        case .authenticationFailed(let msg): return "Failed to authenticate administrator access: \(msg)"
         }
     }
 }
@@ -59,7 +61,7 @@ class UserIsolationService {
 
         for (description, args) in commands {
             do {
-                try ProcessExecutor.runSudoOrThrow(arguments: args, errorMessage: description)
+                try runAuthenticatedSudoOrThrow(arguments: args, errorMessage: description)
             } catch {
                 throw IsolationError.userCreationFailed("\(description) failed: \(error.localizedDescription)")
             }
@@ -70,7 +72,7 @@ class UserIsolationService {
         // Remove user record
         let dscl = Process()
         dscl.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-        dscl.arguments = ["dscl", ".", "-delete", "/Users/\(username)"]
+        dscl.arguments = ["-n", "dscl", ".", "-delete", "/Users/\(username)"]
         let pipe = Pipe()
         dscl.standardOutput = pipe
         dscl.standardError = pipe
@@ -86,7 +88,7 @@ class UserIsolationService {
         if removeHome {
             let rm = Process()
             rm.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-            rm.arguments = ["rm", "-rf", "/Users/\(username)"]
+            rm.arguments = ["-n", "rm", "-rf", "/Users/\(username)"]
             rm.standardOutput = FileHandle.nullDevice
             rm.standardError = FileHandle.nullDevice
             try rm.run()
@@ -100,7 +102,7 @@ class UserIsolationService {
 
         // Create home and runners directory
         try ProcessExecutor.runSudoOrThrow(
-            arguments: ["mkdir", "-p", runnersPath],
+            arguments: ["-n", "mkdir", "-p", runnersPath],
             errorMessage: "Failed to create home directory"
         )
 
@@ -114,7 +116,7 @@ class UserIsolationService {
         // Write via sudo tee
         let tee = Process()
         tee.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-        tee.arguments = ["tee", zprofilePath]
+        tee.arguments = ["-n", "tee", zprofilePath]
         let inputPipe = Pipe()
         tee.standardInput = inputPipe
         tee.standardOutput = FileHandle.nullDevice
@@ -126,7 +128,7 @@ class UserIsolationService {
 
         // chown the entire home to the service user
         _ = try ProcessExecutor.runSudo(
-            arguments: ["chown", "-R", "\(username):staff", homePath],
+            arguments: ["-n", "chown", "-R", "\(username):staff", homePath],
             silent: true
         )
     }
@@ -220,7 +222,7 @@ class UserIsolationService {
         // Move to /etc/sudoers.d/ via sudo
         let mv = Process()
         mv.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-        mv.arguments = ["mv", tempPath, sudoersPath]
+        mv.arguments = ["-n", "mv", tempPath, sudoersPath]
         let mvPipe = Pipe()
         mv.standardOutput = mvPipe
         mv.standardError = mvPipe
@@ -238,11 +240,35 @@ class UserIsolationService {
 
         let rm = Process()
         rm.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-        rm.arguments = ["rm", sudoersPath]
+        rm.arguments = ["-n", "rm", sudoersPath]
         rm.standardOutput = FileHandle.nullDevice
         rm.standardError = FileHandle.nullDevice
         try rm.run()
         rm.waitUntilExit()
+    }
+
+    func hasSudoersEntry() -> Bool {
+        FileManager.default.fileExists(atPath: sudoersPath)
+    }
+
+    func authenticateAdministratorAccess() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+        process.arguments = ["-v"]
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw IsolationError.authenticationFailed("sudo authentication was cancelled or failed")
+        }
+    }
+
+    private func runAuthenticatedSudoOrThrow(arguments: [String], errorMessage: String) throws {
+        let result = try ProcessExecutor.runSudo(arguments: ["-n"] + arguments)
+        guard result.succeeded else {
+            throw ProcessExecutorError.executionFailed("\(errorMessage): \(result.output)")
+        }
     }
 
     // MARK: - Helpers

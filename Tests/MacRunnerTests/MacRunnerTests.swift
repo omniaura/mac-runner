@@ -49,4 +49,44 @@ final class MacRunnerTests: XCTestCase {
 
         XCTAssertNil(preferredPath)
     }
+
+    func testDetectedIsolationUsernameUsesConfiguredDedicatedUser() {
+        let username = SetupWizard.detectedIsolationUsername(
+            configuredIsolationMode: .dedicatedUser(username: "_customrunner"),
+            userExists: { _ in false },
+            hasSudoersEntry: { false }
+        )
+
+        XCTAssertEqual(username, "_customrunner")
+    }
+
+    func testDetectedIsolationUsernameFallsBackToDefaultUserWhenArtifactsExist() {
+        let username = SetupWizard.detectedIsolationUsername(
+            configuredIsolationMode: .none,
+            userExists: { $0 == IsolationMode.defaultUsername },
+            hasSudoersEntry: { false }
+        )
+
+        XCTAssertEqual(username, IsolationMode.defaultUsername)
+    }
+
+    func testDetectedIsolationUsernameFallsBackToDefaultUserWhenSudoersExists() {
+        let username = SetupWizard.detectedIsolationUsername(
+            configuredIsolationMode: .none,
+            userExists: { _ in false },
+            hasSudoersEntry: { true }
+        )
+
+        XCTAssertEqual(username, IsolationMode.defaultUsername)
+    }
+
+    func testDetectedIsolationUsernameReturnsNilWithoutConfigOrArtifacts() {
+        let username = SetupWizard.detectedIsolationUsername(
+            configuredIsolationMode: .none,
+            userExists: { _ in false },
+            hasSudoersEntry: { false }
+        )
+
+        XCTAssertNil(username)
+    }
 }
