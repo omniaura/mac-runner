@@ -12,7 +12,7 @@ import Containerization
 /// ## Requirements
 /// - macOS 26.0+
 /// - Apple Silicon (arm64)
-/// - Linux kernel 6.14.9+ (provided by the framework)
+/// - Linux kernel 6.14.9+ (supplied by Mac Runner via a bundled or local `vmlinux`)
 ///
 /// ## Architecture
 /// Each containerized runner runs in its own lightweight VM with:
@@ -42,7 +42,7 @@ class ContainerIsolationService {
     /// Creates a new container isolation service.
     ///
     /// - Parameters:
-    ///   - kernelPath: Path to the Linux kernel binary (vmlinux).
+    ///   - kernelPath: Path to the Linux kernel binary (`vmlinux`) that Mac Runner resolved.
     ///   - imageStorePath: Path to the directory for storing OCI images.
     init(kernelPath: URL, imageStorePath: URL) {
         self.kernelPath = kernelPath
