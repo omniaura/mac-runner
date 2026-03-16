@@ -9,10 +9,13 @@ struct AddRunnerView: View {
     @State private var labelsText = "macos, mac-runner"
     @State private var selectedIsolation: IsolationSelection = .global
     @State private var enableGUI = false
-    @State private var repos: [String] = []
+    @State private var repoSections: [(header: String, repos: [String])] = []
+    @State private var repoSearchText = ""
     @State private var isLoadingRepos = false
     @State private var showRepoPicker = false
+    @State private var numberOfInstances = 1
     @State private var isAdding = false
+    @State private var addingProgress: (current: Int, total: Int)?
     @State private var errorMessage: String?
 
     enum IsolationSelection: String, CaseIterable, Identifiable {
@@ -30,6 +33,17 @@ struct AddRunnerView: View {
             case .user: return .dedicatedUser(username: IsolationMode.defaultUsername)
             case .container: return .container
             }
+        }
+    }
+
+    private var filteredSections: [(header: String, repos: [String])] {
+        if repoSearchText.isEmpty {
+            return repoSections
+        }
+        let query = repoSearchText.lowercased()
+        return repoSections.compactMap { section in
+            let filtered = section.repos.filter { $0.lowercased().contains(query) }
+            return filtered.isEmpty ? nil : (header: section.header, repos: filtered)
         }
     }
 
@@ -73,36 +87,65 @@ struct AddRunnerView: View {
                             }
                         }
 
-                        if showRepoPicker, !repos.isEmpty {
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    ForEach(repos, id: \.self) { r in
-                                        Button(action: {
-                                            repo = r
-                                            showRepoPicker = false
-                                        }) {
-                                            HStack {
-                                                Text(r)
-                                                    .font(.system(.caption, design: .monospaced))
-                                                Spacer()
-                                                if r == repo {
-                                                    Image(systemName: "checkmark")
-                                                        .foregroundColor(.accentColor)
-                                                        .font(.caption)
+                        if showRepoPicker, !repoSections.isEmpty {
+                            VStack(spacing: 0) {
+                                TextField("Search repos...", text: $repoSearchText)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.caption)
+                                    .padding(6)
+
+                                Divider()
+
+                                if filteredSections.isEmpty {
+                                    Text("No matching repos")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .padding(8)
+                                } else {
+                                    ScrollView {
+                                        VStack(alignment: .leading, spacing: 0) {
+                                            ForEach(filteredSections, id: \.header) { section in
+                                                Text(section.header)
+                                                    .font(.system(.caption2, design: .monospaced))
+                                                    .fontWeight(.semibold)
+                                                    .foregroundColor(.secondary)
+                                                    .padding(.horizontal, 8)
+                                                    .padding(.top, 8)
+                                                    .padding(.bottom, 4)
+
+                                                ForEach(section.repos, id: \.self) { r in
+                                                    Button(action: {
+                                                        repo = r
+                                                        showRepoPicker = false
+                                                        repoSearchText = ""
+                                                    }) {
+                                                        HStack {
+                                                            Text(r)
+                                                                .font(.system(.caption, design: .monospaced))
+                                                            Spacer()
+                                                            if r == repo {
+                                                                Image(systemName: "checkmark")
+                                                                    .foregroundColor(.accentColor)
+                                                                    .font(.caption)
+                                                            }
+                                                        }
+                                                        .contentShape(Rectangle())
+                                                        .padding(.vertical, 4)
+                                                        .padding(.horizontal, 8)
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                }
+
+                                                if section.header != filteredSections.last?.header {
+                                                    Divider()
+                                                        .padding(.top, 4)
                                                 }
                                             }
-                                            .contentShape(Rectangle())
-                                            .padding(.vertical, 4)
-                                            .padding(.horizontal, 8)
-                                        }
-                                        .buttonStyle(.plain)
-                                        if r != repos.last {
-                                            Divider()
                                         }
                                     }
+                                    .frame(maxHeight: 200)
                                 }
                             }
-                            .frame(height: min(CGFloat(repos.count) * 28, 140))
                             .background(Color.gray.opacity(0.1))
                             .cornerRadius(6)
                             .overlay(
@@ -171,6 +214,38 @@ struct AddRunnerView: View {
                         }
                     }
 
+                    // Number of Instances
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Number of Instances")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        HStack {
+                            Stepper(value: $numberOfInstances, in: 1...20) {
+                                Text("\(numberOfInstances)")
+                                    .font(.system(.body, design: .monospaced))
+                                    .frame(minWidth: 24, alignment: .center)
+                            }
+                        }
+
+                        if numberOfInstances > 1 {
+                            let baseName = name.isEmpty ? "mac-runner" : name
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(1...min(numberOfInstances, 5), id: \.self) { i in
+                                    Text("\(baseName)-\(i)")
+                                        .font(.system(.caption, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                }
+                                if numberOfInstances > 5 {
+                                    Text("... and \(numberOfInstances - 5) more")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(.top, 2)
+                        }
+                    }
+
                     if let error = errorMessage {
                         Text(error)
                             .foregroundColor(.red)
@@ -192,12 +267,17 @@ struct AddRunnerView: View {
                 Spacer()
 
                 if isAdding {
+                    if let progress = addingProgress, progress.total > 1 {
+                        Text("\(progress.current)/\(progress.total)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                     ProgressView()
                         .controlSize(.small)
                         .padding(.trailing, 8)
                 }
 
-                Button("Add Runner") {
+                Button(numberOfInstances > 1 ? "Add \(numberOfInstances) Runners" : "Add Runner") {
                     Task { await addRunner() }
                 }
                 .buttonStyle(.borderedProminent)
@@ -206,7 +286,7 @@ struct AddRunnerView: View {
             }
             .padding()
         }
-        .frame(width: 400, height: 480)
+        .frame(width: 400, height: 560)
     }
 
     private func loadRepos() async {
@@ -215,7 +295,17 @@ struct AddRunnerView: View {
         errorMessage = nil
 
         do {
-            repos = try await GHCLIService.shared.listRepos()
+            let allRepos = try await GHCLIService.shared.listAllRepos()
+            var sections: [(header: String, repos: [String])] = []
+
+            if !allRepos.personal.isEmpty {
+                sections.append((header: "Personal", repos: allRepos.personal.sorted()))
+            }
+            for (org, repos) in allRepos.orgRepos where !repos.isEmpty {
+                sections.append((header: org, repos: repos.sorted()))
+            }
+
+            repoSections = sections
             showRepoPicker = true
         } catch {
             errorMessage = error.localizedDescription
@@ -224,10 +314,14 @@ struct AddRunnerView: View {
 
     private func addRunner() async {
         isAdding = true
-        defer { isAdding = false }
+        addingProgress = nil
+        defer {
+            isAdding = false
+            addingProgress = nil
+        }
         errorMessage = nil
 
-        let runnerName = name.isEmpty
+        let baseName = name.isEmpty
             ? "mac-runner-\(Int.random(in: 1000...9999))"
             : name
 
@@ -237,12 +331,16 @@ struct AddRunnerView: View {
             .filter { !$0.isEmpty }
 
         do {
-            try await runnerManager.addRunner(
-                name: runnerName,
+            try await runnerManager.addRunners(
+                baseName: baseName,
                 repo: repo,
                 labels: labels.isEmpty ? ["macos"] : labels,
+                count: numberOfInstances,
                 isolationMode: selectedIsolation.isolationMode,
-                enableGUI: enableGUI
+                enableGUI: enableGUI,
+                onProgress: { current, total in
+                    addingProgress = (current: current, total: total)
+                }
             )
             dismiss()
         } catch {

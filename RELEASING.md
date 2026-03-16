@@ -135,25 +135,25 @@ After release is published:
 
 Falls back to simple hdiutil DMG if create-dmg fails. This is normal and acceptable.
 
-## Code Signing (Optional)
+## Code Signing & Notarization
 
-For distributing outside the App Store, you'll want to code sign:
+Code signing and notarization are fully automated in the release workflow. The app is signed with a Developer ID Application certificate and notarized with Apple, so users will not see Gatekeeper warnings.
 
-1. Get a Developer ID certificate from Apple
-2. Add to GitHub Secrets:
-   - `MACOS_CERTIFICATE` (base64 encoded .p12)
-   - `MACOS_CERTIFICATE_PWD` (password)
-   - `MACOS_CERTIFICATE_NAME` (certificate name)
+### Required GitHub Secrets
 
-3. GitHub Action will automatically sign if secrets are present
+| Secret | Description |
+|--------|-------------|
+| `APPLE_CERTIFICATE_BASE64` | Base64-encoded `.p12` Developer ID Application certificate |
+| `APPLE_CERTIFICATE_PASSWORD` | Password for the `.p12` file |
+| `APPLE_TEAM_ID` | 10-character Apple Developer Team ID |
+| `APPLE_ID` | Apple ID email used for notarization |
+| `APPLE_ID_PASSWORD` | App-specific password for notarization (generate at appleid.apple.com) |
 
-## Notarization (Future)
+### How it works
 
-For Gatekeeper compatibility:
-
-1. Sign the app
-2. Create DMG
-3. Submit to Apple for notarization
-4. Staple the notarization ticket
-
-This will be automated in a future release.
+1. A temporary keychain is created and the signing certificate is imported
+2. The app bundle binary and `.app` are signed with `codesign --options runtime`
+3. The signed ZIP is submitted to Apple for notarization via `xcrun notarytool`
+4. The notarization ticket is stapled to the app and the ZIP is re-created
+5. The DMG is created from the stapled app, then signed and notarized separately
+6. The temporary keychain is cleaned up

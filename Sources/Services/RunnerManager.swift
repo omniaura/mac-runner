@@ -35,6 +35,8 @@ class RunnerManager: ObservableObject {
     private(set) var currentSettings: AppSettings = .default
     private var statusPollingTask: Task<Void, Never>?
     private var runnersToAutoRestart: Set<UUID> = []
+    /// Names reserved by in-flight addRunner calls to prevent duplicate naming race conditions.
+    private var pendingRunnerNames: Set<String> = []
 
     /// Initialize the RunnerManager and restore runtime state.
     ///
@@ -173,9 +175,18 @@ class RunnerManager: ObservableObject {
 
     /// Synchronize the macOS login item registration with current settings.
     ///
-    /// Registers or unregisters the app as a login item based on the startOnLogin setting.
+    /// First reconciles the config with the actual OS state (in case the user toggled
+    /// the login item via System Settings), then registers or unregisters as needed.
     private func syncLoginItem() {
         let service = SMAppService.mainApp
+        let osEnabled = service.status == .enabled
+
+        // Reconcile: if OS state disagrees with config, trust the OS
+        if currentSettings.startOnLogin != osEnabled {
+            currentSettings.startOnLogin = osEnabled
+            saveConfiguration()
+        }
+
         do {
             if currentSettings.startOnLogin {
                 if service.status != .enabled {
@@ -586,19 +597,60 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Duplicate Runner
 
-    /// Create a duplicate of an existing runner with a new name
+    /// Strip a trailing `-N` numeric suffix from a runner name to get the base name.
+    ///
+    /// Examples:
+    /// - `"my-runner-2"` → `"my-runner"`
+    /// - `"my-runner"` → `"my-runner"`
+    /// - `"my-runner-2-3"` → `"my-runner-2"`
+    static func baseName(from name: String) -> String {
+        guard let dashRange = name.range(of: "-", options: .backwards) else {
+            return name
+        }
+        let suffix = String(name[dashRange.upperBound...])
+        if suffix.allSatisfy(\.isNumber), !suffix.isEmpty {
+            return String(name[..<dashRange.lowerBound])
+        }
+        return name
+    }
+
+    /// Generate a unique runner name by incrementing a numeric suffix.
+    ///
+    /// Checks both the existing `runners` array and `pendingRunnerNames`
+    /// to avoid race conditions when multiple duplications or bulk creations
+    /// are in flight concurrently.
+    ///
+    /// - Parameter base: The base name without numeric suffix
+    /// - Returns: A unique name like `"base-2"`, `"base-3"`, etc.
+    func generateUniqueRunnerName(base: String) -> String {
+        let allNames = Set(runners.map(\.name)).union(pendingRunnerNames)
+        var counter = 2
+        var candidate = "\(base)-\(counter)"
+        while allNames.contains(candidate) {
+            counter += 1
+            candidate = "\(base)-\(counter)"
+        }
+        return candidate
+    }
+
+    /// Create a duplicate of an existing runner with a new name.
+    ///
+    /// Strips any trailing numeric suffix from the original name to determine
+    /// the base, then generates the next available incremented name. The name
+    /// is reserved in `pendingRunnerNames` before the async `addRunner` call
+    /// to prevent race conditions when duplicating rapidly.
     func duplicateRunner(_ id: UUID) async throws {
         guard let originalRunner = runners.first(where: { $0.id == id }) else {
             throw RunnerError.notFound
         }
 
-        // Generate new name with incrementing suffix
-        var newName = "\(originalRunner.name)-2"
-        var counter = 2
-        while runners.contains(where: { $0.name == newName }) {
-            counter += 1
-            newName = "\(originalRunner.name)-\(counter)"
-        }
+        // Strip trailing -N suffix so duplicating "runner-2" yields "runner-3" not "runner-2-2"
+        let base = Self.baseName(from: originalRunner.name)
+        let newName = generateUniqueRunnerName(base: base)
+
+        // Reserve the name before async work to prevent duplicates
+        pendingRunnerNames.insert(newName)
+        defer { pendingRunnerNames.remove(newName) }
 
         // Create duplicate with same settings, preserving isolation mode and GUI access
         try await addRunner(
@@ -608,6 +660,88 @@ class RunnerManager: ObservableObject {
             isolationMode: originalRunner.isolationMode,
             enableGUI: originalRunner.enableGUI
         )
+    }
+
+    // MARK: - Bulk Runner Creation
+
+    /// Create multiple runner instances with auto-numbered names.
+    ///
+    /// When `count` is 1, creates a single runner with the exact `baseName` (current behavior).
+    /// When `count` > 1, creates runners named `baseName-1`, `baseName-2`, etc.
+    /// Names are reserved upfront in `pendingRunnerNames` to prevent collisions,
+    /// then runners are registered sequentially.
+    ///
+    /// - Parameters:
+    ///   - baseName: The base name for the runners
+    ///   - repo: GitHub repository in "owner/repo" format
+    ///   - labels: Labels to assign to each runner
+    ///   - count: Number of instances to create (must be >= 1)
+    ///   - isolationMode: Optional isolation mode override
+    ///   - enableGUI: Whether to enable GUI access
+    ///   - onProgress: Called after each runner is created with (completed, total)
+    /// - Throws: RunnerError if validation or setup fails for any runner
+    func addRunners(
+        baseName: String,
+        repo: String,
+        labels: [String],
+        count: Int,
+        isolationMode: IsolationMode? = nil,
+        enableGUI: Bool = false,
+        onProgress: ((Int, Int) -> Void)? = nil
+    ) async throws {
+        guard count >= 1 else { return }
+
+        // Single runner: use exact name (current behavior)
+        if count == 1 {
+            try await addRunner(
+                name: baseName,
+                repo: repo,
+                labels: labels,
+                isolationMode: isolationMode,
+                enableGUI: enableGUI
+            )
+            onProgress?(1, 1)
+            return
+        }
+
+        // Multiple runners: generate numbered names and reserve them upfront
+        var names: [String] = []
+        for i in 1...count {
+            let candidate = "\(baseName)-\(i)"
+            let allNames = Set(runners.map(\.name)).union(pendingRunnerNames)
+            if allNames.contains(candidate) {
+                // If the numbered name collides, find the next available
+                let name = generateUniqueRunnerName(base: baseName)
+                names.append(name)
+                pendingRunnerNames.insert(name)
+            } else {
+                names.append(candidate)
+                pendingRunnerNames.insert(candidate)
+            }
+        }
+
+        // Register runners sequentially, releasing pending names as we go
+        var errors: [(name: String, error: Error)] = []
+        for (index, name) in names.enumerated() {
+            do {
+                try await addRunner(
+                    name: name,
+                    repo: repo,
+                    labels: labels,
+                    isolationMode: isolationMode,
+                    enableGUI: enableGUI
+                )
+            } catch {
+                errors.append((name: name, error: error))
+            }
+            pendingRunnerNames.remove(name)
+            onProgress?(index + 1, count)
+        }
+
+        if !errors.isEmpty {
+            let message = errors.map { "\($0.name): \($0.error.localizedDescription)" }.joined(separator: "; ")
+            throw RunnerError.bulkCreationPartialFailure(succeeded: count - errors.count, failed: errors.count, details: message)
+        }
     }
 
     // MARK: - Private Helpers
@@ -637,6 +771,7 @@ enum RunnerError: LocalizedError {
     case invalidRepo
     case startFailed
     case containerServiceNotAvailable
+    case bulkCreationPartialFailure(succeeded: Int, failed: Int, details: String)
 
     var errorDescription: String? {
         switch self {
@@ -647,6 +782,8 @@ enum RunnerError: LocalizedError {
         case .startFailed: return "Failed to start runner process"
         case .containerServiceNotAvailable:
             return "Container isolation requires macOS 26.0+ and is not available on this system"
+        case .bulkCreationPartialFailure(let succeeded, let failed, let details):
+            return "Bulk creation: \(succeeded) succeeded, \(failed) failed (\(details))"
         }
     }
 }

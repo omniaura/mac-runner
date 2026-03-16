@@ -126,6 +126,62 @@ jobs:
           chmod +x build/MacRunner.app/Contents/MacOS/MacRunner
           ./scripts/generate-info-plist.sh > build/MacRunner.app/Contents/Info.plist
 
+      # ── Code Signing ──────────────────────────────────────────────────
+      - name: Import signing certificate
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          # Generate a random password for the temporary keychain
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          # Create a temporary keychain
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import the certificate
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          rm -f "$CERT_PATH"
+
+          # Allow codesign to access the keychain without prompting
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Add temporary keychain to the search list
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+          # Save keychain path for later cleanup
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Code sign app bundle
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          IDENTITY="Developer ID Application: Omni Aura LLC ($APPLE_TEAM_ID)"
+
+          echo "Signing the binary..."
+          codesign --force --options runtime \
+            --sign "$IDENTITY" \
+            --timestamp \
+            build/MacRunner.app/Contents/MacOS/MacRunner
+
+          echo "Signing the app bundle..."
+          codesign --force --options runtime --deep \
+            --sign "$IDENTITY" \
+            --timestamp \
+            build/MacRunner.app
+
+          echo "Verifying signature..."
+          codesign --verify --deep --strict --verbose=2 build/MacRunner.app
+
+      # ── Create ZIP ────────────────────────────────────────────────────
       - name: Create ZIP
         id: zip
         env:
@@ -135,6 +191,37 @@ jobs:
           zip -r "MacRunner-${VERSION}.zip" MacRunner.app
           echo "sha256=$(shasum -a 256 "MacRunner-${VERSION}.zip" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
+      # ── Notarize ZIP ──────────────────────────────────────────────────
+      - name: Notarize app (via ZIP)
+        env:
+          VERSION: ${{ needs.check-release.outputs.version }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          echo "Submitting ZIP for notarization..."
+          xcrun notarytool submit "build/MacRunner-${VERSION}.zip" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          echo "Stapling notarization ticket to app..."
+          xcrun stapler staple build/MacRunner.app
+
+          echo "Re-creating ZIP with stapled app..."
+          rm -f "build/MacRunner-${VERSION}.zip"
+          cd build
+          zip -r "MacRunner-${VERSION}.zip" MacRunner.app
+
+      - name: Update ZIP SHA256
+        id: zip_final
+        env:
+          VERSION: ${{ needs.check-release.outputs.version }}
+        run: |
+          echo "sha256=$(shasum -a 256 "build/MacRunner-${VERSION}.zip" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      # ── Create DMG ────────────────────────────────────────────────────
       - name: Create DMG
         env:
           VERSION: ${{ needs.check-release.outputs.version }}
@@ -156,10 +243,43 @@ jobs:
             -ov -format UDZO \
             "build/MacRunner-${VERSION}.dmg"
 
+      # ── Sign & Notarize DMG ───────────────────────────────────────────
+      - name: Sign and notarize DMG
+        env:
+          VERSION: ${{ needs.check-release.outputs.version }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+        run: |
+          IDENTITY="Developer ID Application: Omni Aura LLC ($APPLE_TEAM_ID)"
+
+          echo "Signing DMG..."
+          codesign --force --sign "$IDENTITY" --timestamp "build/MacRunner-${VERSION}.dmg"
+
+          echo "Submitting DMG for notarization..."
+          xcrun notarytool submit "build/MacRunner-${VERSION}.dmg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          echo "Stapling notarization ticket to DMG..."
+          xcrun stapler staple "build/MacRunner-${VERSION}.dmg"
+
+      # ── Cleanup Keychain ──────────────────────────────────────────────
+      - name: Clean up signing keychain
+        if: always()
+        run: |
+          if [ -n "$KEYCHAIN_PATH" ] && security list-keychains | grep -q "signing.keychain-db"; then
+            security delete-keychain "$KEYCHAIN_PATH"
+            echo "Temporary keychain removed."
+          fi
+
+      # ── Release ───────────────────────────────────────────────────────
       - name: Update Homebrew cask
         env:
           VERSION: ${{ needs.check-release.outputs.version }}
-          SHA256: ${{ steps.zip.outputs.sha256 }}
+          SHA256: ${{ steps.zip_final.outputs.sha256 }}
         run: |
           sed -i '' 's/version ".*"/version "'"${VERSION}"'"/' Casks/mac-runner.rb
           sed -i '' 's/sha256 .*/sha256 "'"${SHA256}"'"/' Casks/mac-runner.rb
@@ -191,3 +311,41 @@ jobs:
             "build/MacRunner-${VERSION}.zip" \
             "build/MacRunner-${VERSION}.dmg" \
             --clobber
+
+  # Step 4: Update Homebrew tap (runs on ubuntu, after release)
+  update-homebrew-tap:
+    name: Update Homebrew tap
+    needs: [check-release, build-and-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mac-runner (for cask source)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: omniaura/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update cask in homebrew-tap
+        run: |
+          cp Casks/mac-runner.rb homebrew-tap/Casks/mac-runner.rb
+
+      - name: Commit and push
+        env:
+          VERSION: ${{ needs.check-release.outputs.version }}
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "No changes to cask"
+            exit 0
+          fi
+          git add Casks/mac-runner.rb
+          git commit -m "chore: update mac-runner cask to ${VERSION}"
+          git push origin main

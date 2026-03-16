@@ -85,8 +85,14 @@ final class GHCLIService: Sendable {
 
     // MARK: - Repos
 
-    func listRepos() async throws -> [String] {
-        let result = try await runGH(["repo", "list", "--json", "nameWithOwner", "--limit", "50"])
+    func listRepos(owner: String? = nil) async throws -> [String] {
+        var args = ["repo", "list"]
+        if let owner {
+            args.append(owner)
+        }
+        args += ["--json", "nameWithOwner", "--limit", "100"]
+
+        let result = try await runGH(args)
         guard result.exitCode == 0 else {
             throw GHError.apiFailed("Failed to list repos: \(result.stderr)")
         }
@@ -98,6 +104,39 @@ final class GHCLIService: Sendable {
         let data = Data(result.stdout.utf8)
         let repos = try JSONDecoder().decode([RepoEntry].self, from: data)
         return repos.map(\.nameWithOwner)
+    }
+
+    func listOrgs() async throws -> [String] {
+        let result = try await runGH(["api", "/user/orgs", "--jq", ".[].login"])
+        guard result.exitCode == 0 else {
+            throw GHError.apiFailed("Failed to list orgs: \(result.stderr)")
+        }
+        guard !result.stdout.isEmpty else { return [] }
+        return result.stdout.components(separatedBy: "\n").filter { !$0.isEmpty }
+    }
+
+    func listAllRepos() async throws -> (personal: [String], orgRepos: [(org: String, repos: [String])]) {
+        async let personalRepos = listRepos()
+        async let orgs = listOrgs()
+
+        let fetchedOrgs = try await orgs
+        let fetchedPersonal = try await personalRepos
+
+        let orgResults = try await withThrowingTaskGroup(of: (String, [String]).self) { group in
+            for org in fetchedOrgs {
+                group.addTask {
+                    let repos = try await self.listRepos(owner: org)
+                    return (org, repos)
+                }
+            }
+            var results: [(String, [String])] = []
+            for try await result in group {
+                results.append(result)
+            }
+            return results.sorted { $0.0.lowercased() < $1.0.lowercased() }
+        }
+
+        return (personal: fetchedPersonal, orgRepos: orgResults)
     }
 
     func validateRepo(_ repo: String) async throws -> Bool {

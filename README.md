@@ -30,8 +30,7 @@ GitHub Actions self-hosted runners are great, but:
 ### Homebrew
 
 ```bash
-brew tap omniaura/tap https://github.com/omniaura/mac-runner
-brew install --cask mac-runner
+brew install --cask omniaura/tap/mac-runner
 ```
 
 ### Direct Download
@@ -47,7 +46,6 @@ xattr -cr /Applications/MacRunner.app
 ```
 
 You can also right-click the app in Applications and choose "Open".
-
 ### Prerequisites
 
 - macOS 13+ (macOS 15+ for user isolation, macOS 26+ for container isolation)

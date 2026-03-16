@@ -1,3 +1,50 @@
+# [1.10.0](https://github.com/omniaura/mac-runner/compare/v1.9.0...v1.10.0) (2026-03-16)
+
+
+### Bug Fixes
+
+* correct signing identity name and simplify Homebrew install ([3cb33f4](https://github.com/omniaura/mac-runner/commit/3cb33f4a1c9124c9760b316d2b57672799a1cfcd))
+
+
+### Features
+
+* add code signing and notarization to release workflow ([#55](https://github.com/omniaura/mac-runner/issues/55)) ([da50fc2](https://github.com/omniaura/mac-runner/commit/da50fc2abdf47cdd143bb299ced56460d0374e2a))
+
+# [1.9.0](https://github.com/omniaura/mac-runner/compare/v1.8.1...v1.9.0) (2026-03-16)
+
+
+### Features
+
+* group runners by org/repo in menubar dropdown ([#49](https://github.com/omniaura/mac-runner/issues/49)) ([222633d](https://github.com/omniaura/mac-runner/commit/222633d80e7474611fb533d17693ce4bab977a40)), closes [#19](https://github.com/omniaura/mac-runner/issues/19)
+
+## [1.8.1](https://github.com/omniaura/mac-runner/compare/v1.8.0...v1.8.1) (2026-03-04)
+
+
+### Bug Fixes
+
+* resolve duplicate runner naming race condition and add bulk creation ([#17](https://github.com/omniaura/mac-runner/issues/17)) ([#45](https://github.com/omniaura/mac-runner/issues/45)) ([28d7900](https://github.com/omniaura/mac-runner/commit/28d790062b99f02a0c15cc72f5d7f0ebc032e40e))
+
+# [1.8.0](https://github.com/omniaura/mac-runner/compare/v1.7.2...v1.8.0) (2026-03-03)
+
+
+### Features
+
+* include org repos in Browse picker with search and grouping ([#38](https://github.com/omniaura/mac-runner/issues/38)) ([6fa5173](https://github.com/omniaura/mac-runner/commit/6fa51738866951e2ecdffa00a2d8a3c17cefb5af)), closes [#37](https://github.com/omniaura/mac-runner/issues/37)
+
+## [1.7.2](https://github.com/omniaura/mac-runner/compare/v1.7.1...v1.7.2) (2026-02-23)
+
+
+### Bug Fixes
+
+* increase file descriptor limit to 65536 for runner processes ([#34](https://github.com/omniaura/mac-runner/issues/34)) ([297846e](https://github.com/omniaura/mac-runner/commit/297846e157212ab15cb666fd4ab56be96976297f)), closes [#32](https://github.com/omniaura/mac-runner/issues/32)
+
+## [1.7.1](https://github.com/omniaura/mac-runner/compare/v1.7.0...v1.7.1) (2026-02-23)
+
+
+### Bug Fixes
+
+* set TMPDIR for service user to fix oxfmt DataCloneError ([#35](https://github.com/omniaura/mac-runner/issues/35)) ([bce2e39](https://github.com/omniaura/mac-runner/commit/bce2e3969d2732720fb5401df8e810eb9de2af4e)), closes [#33](https://github.com/omniaura/mac-runner/issues/33)
+
 # [1.7.0](https://github.com/omniaura/mac-runner/compare/v1.6.2...v1.7.0) (2026-02-17)
 
 
