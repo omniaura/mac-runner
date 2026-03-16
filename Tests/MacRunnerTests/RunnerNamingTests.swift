@@ -2,6 +2,7 @@ import XCTest
 @testable import MacRunner
 
 /// Unit tests for runner name generation — baseName stripping and unique name logic.
+@MainActor
 final class RunnerNamingTests: XCTestCase {
 
     // MARK: - baseName(from:)
