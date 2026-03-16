@@ -150,9 +150,18 @@ class RunnerManager: ObservableObject {
 
     /// Synchronize the macOS login item registration with current settings.
     ///
-    /// Registers or unregisters the app as a login item based on the startOnLogin setting.
+    /// First reconciles the config with the actual OS state (in case the user toggled
+    /// the login item via System Settings), then registers or unregisters as needed.
     private func syncLoginItem() {
         let service = SMAppService.mainApp
+        let osEnabled = service.status == .enabled
+
+        // Reconcile: if OS state disagrees with config, trust the OS
+        if currentSettings.startOnLogin != osEnabled {
+            currentSettings.startOnLogin = osEnabled
+            saveConfiguration()
+        }
+
         do {
             if currentSettings.startOnLogin {
                 if service.status != .enabled {
