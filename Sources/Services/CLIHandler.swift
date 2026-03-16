@@ -137,7 +137,7 @@ enum CLIHandler {
     private static func handleAdd(args: [String]) async {
         guard let repo = args.first, repo.contains("/") else {
             print("Error: repository required in owner/repo format")
-            print("Usage: mac-runner add <owner/repo> [--name <name>] [--labels <l1,l2>] [--isolation <mode>] [--enable-gui]")
+            print("Usage: mac-runner add <owner/repo> [--name <name>] [--labels <l1,l2>] [--isolation <mode>] [--enable-gui] [--open-files <limit>]")
             return
         }
 
@@ -145,6 +145,7 @@ enum CLIHandler {
         var labels = ["macos", "mac-runner"]
         var isolationMode: IsolationMode? = nil
         var enableGUI = false
+        var openFileLimit: Int? = nil
 
         // Parse optional flags
         var i = 1
@@ -173,6 +174,13 @@ enum CLIHandler {
             case "--enable-gui":
                 enableGUI = true
                 i += 1
+            case "--open-files" where i + 1 < args.count:
+                guard let parsed = Int(args[i + 1]), parsed > 0 else {
+                    print("Error: --open-files must be a positive integer")
+                    return
+                }
+                openFileLimit = parsed
+                i += 2
             default:
                 i += 1
             }
@@ -188,7 +196,14 @@ enum CLIHandler {
         print("Adding runner '\(name)' for \(repo)...")
         let manager = RunnerManager()
         do {
-            try await manager.addRunner(name: name, repo: repo, labels: labels, isolationMode: isolationMode, enableGUI: enableGUI)
+            try await manager.addRunner(
+                name: name,
+                repo: repo,
+                labels: labels,
+                isolationMode: isolationMode,
+                enableGUI: enableGUI,
+                openFileLimit: openFileLimit
+            )
             var message = "Runner '\(name)' added"
             if let mode = isolationMode {
                 message += " with \(mode.displayName) isolation"
@@ -196,6 +211,9 @@ enum CLIHandler {
                 message += " (using global isolation mode)"
             }
             message += enableGUI ? " with GUI access" : " (headless)"
+            if let openFileLimit {
+                message += " and open file limit \(openFileLimit)"
+            }
             message += " and started successfully!"
             print(message)
         } catch {

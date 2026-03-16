@@ -11,6 +11,7 @@ struct Runner: Identifiable, Codable, Sendable {
     var busy: Bool  // Whether runner is currently executing a job
     var isolationMode: IsolationMode?  // Per-runner isolation override (nil = use global setting)
     var enableGUI: Bool  // Whether to enable GUI access for this runner (default: false, headless)
+    var openFileLimit: Int?  // Per-runner override for max open files (nil = use global setting)
 
     init(
         id: UUID = UUID(),
@@ -22,7 +23,8 @@ struct Runner: Identifiable, Codable, Sendable {
         githubRunnerId: Int? = nil,
         busy: Bool = false,
         isolationMode: IsolationMode? = nil,
-        enableGUI: Bool = false
+        enableGUI: Bool = false,
+        openFileLimit: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -34,6 +36,7 @@ struct Runner: Identifiable, Codable, Sendable {
         self.busy = busy
         self.isolationMode = isolationMode
         self.enableGUI = enableGUI
+        self.openFileLimit = ResourceLimits.normalizedOpenFileLimit(openFileLimit)
     }
 
     init(from decoder: Decoder) throws {
@@ -51,6 +54,9 @@ struct Runner: Identifiable, Codable, Sendable {
         isolationMode = try container.decodeIfPresent(IsolationMode.self, forKey: .isolationMode)
         // Default GUI access to false (headless) for backward compatibility
         enableGUI = try container.decodeIfPresent(Bool.self, forKey: .enableGUI) ?? false
+        openFileLimit = ResourceLimits.normalizedOpenFileLimit(
+            try container.decodeIfPresent(Int.self, forKey: .openFileLimit)
+        )
     }
 
     /// Returns the effective isolation mode for this runner.
@@ -62,6 +68,10 @@ struct Runner: Identifiable, Codable, Sendable {
     /// - Returns: The isolation mode to use for this runner.
     func effectiveIsolationMode(global globalMode: IsolationMode) -> IsolationMode {
         return isolationMode ?? globalMode
+    }
+
+    func effectiveOpenFileLimit(global globalLimit: Int) -> Int {
+        openFileLimit ?? globalLimit
     }
 }
 
@@ -168,19 +178,28 @@ struct AppSettings: Codable, Sendable {
     var pauseOnBattery: Bool
     var quietHours: QuietHours?
     var isolationMode: IsolationMode
+    var openFileLimit: Int
 
     static let `default` = AppSettings(
         startOnLogin: false,
         pauseOnBattery: false,
         quietHours: nil,
-        isolationMode: .none
+        isolationMode: .none,
+        openFileLimit: ResourceLimits.defaultOpenFileLimit
     )
 
-    init(startOnLogin: Bool = false, pauseOnBattery: Bool = false, quietHours: QuietHours? = nil, isolationMode: IsolationMode = .none) {
+    init(
+        startOnLogin: Bool = false,
+        pauseOnBattery: Bool = false,
+        quietHours: QuietHours? = nil,
+        isolationMode: IsolationMode = .none,
+        openFileLimit: Int = ResourceLimits.defaultOpenFileLimit
+    ) {
         self.startOnLogin = startOnLogin
         self.pauseOnBattery = pauseOnBattery
         self.quietHours = quietHours
         self.isolationMode = isolationMode
+        self.openFileLimit = ResourceLimits.normalizedOpenFileLimit(openFileLimit) ?? ResourceLimits.defaultOpenFileLimit
     }
 
     init(from decoder: Decoder) throws {
@@ -189,6 +208,9 @@ struct AppSettings: Codable, Sendable {
         pauseOnBattery = try container.decodeIfPresent(Bool.self, forKey: .pauseOnBattery) ?? false
         quietHours = try container.decodeIfPresent(QuietHours.self, forKey: .quietHours)
         isolationMode = try container.decodeIfPresent(IsolationMode.self, forKey: .isolationMode) ?? .none
+        openFileLimit = ResourceLimits.normalizedOpenFileLimit(
+            try container.decodeIfPresent(Int.self, forKey: .openFileLimit)
+        ) ?? ResourceLimits.defaultOpenFileLimit
     }
 }
 
