@@ -1,3 +1,11 @@
+# [1.11.0](https://github.com/omniaura/mac-runner/compare/v1.10.2...v1.11.0) (2026-03-16)
+
+
+### Features
+
+* add configurable open file limits ([#59](https://github.com/omniaura/mac-runner/issues/59)) ([ccf366f](https://github.com/omniaura/mac-runner/commit/ccf366feb5224a453a21ee197f4bbae8561d2c74))
+* auto-restart runners after unexpected exits ([#52](https://github.com/omniaura/mac-runner/issues/52)) ([39af616](https://github.com/omniaura/mac-runner/commit/39af61643e7524116f37bf7500d80c19a53c66b1))
+
 ## [1.10.2](https://github.com/omniaura/mac-runner/compare/v1.10.1...v1.10.2) (2026-03-16)
 
 
