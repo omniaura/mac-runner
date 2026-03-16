@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/omniaura/mac-runner/compare/v1.8.1...v1.9.0) (2026-03-16)
+
+
+### Features
+
+* group runners by org/repo in menubar dropdown ([#49](https://github.com/omniaura/mac-runner/issues/49)) ([222633d](https://github.com/omniaura/mac-runner/commit/222633d80e7474611fb533d17693ce4bab977a40)), closes [#19](https://github.com/omniaura/mac-runner/issues/19)
+
 ## [1.8.1](https://github.com/omniaura/mac-runner/compare/v1.8.0...v1.8.1) (2026-03-04)
 
 
