@@ -1,3 +1,10 @@
+## [1.11.1](https://github.com/omniaura/mac-runner/compare/v1.11.0...v1.11.1) (2026-03-17)
+
+
+### Bug Fixes
+
+* read CLI version from the installed app bundle ([#60](https://github.com/omniaura/mac-runner/issues/60)) ([ee3dc5d](https://github.com/omniaura/mac-runner/commit/ee3dc5d032686c8a16e4ebc5f0c0b0d0764c5df5))
+
 # [1.11.0](https://github.com/omniaura/mac-runner/compare/v1.10.2...v1.11.0) (2026-03-16)
 
 
