@@ -156,6 +156,7 @@ final class UpdateCheckerTests: XCTestCase {
     }
 }
 
+@MainActor
 private func XCTAssertThrowsErrorAsync<T>(
     _ expression: @escaping () async throws -> T,
     file: StaticString = #filePath,
