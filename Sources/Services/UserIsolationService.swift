@@ -127,9 +127,9 @@ class UserIsolationService {
         # with DataCloneError if it's not writable.
         export TMPDIR="\(tmpPath)"
 
-        # Increase file descriptor limit for CI workloads (vitest, jsdom, Bun workers)
-        # Fall back to hard limit if 65536 exceeds it
-        ulimit -n 65536 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
+        # Default file descriptor limit for CI workloads (can be overridden per runner)
+        # Fall back to hard limit if the preferred value exceeds it
+        ulimit -n \(ResourceLimits.defaultOpenFileLimit) 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
         """
         let zprofilePath = "\(homePath)/.zprofile"
 
@@ -161,7 +161,8 @@ class UserIsolationService {
         currentDirectory: String,
         standardOutput: Any? = nil,
         standardError: Any? = nil,
-        enableGUI: Bool = false
+        enableGUI: Bool = false,
+        openFileLimit: Int
     ) throws -> Process {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
@@ -176,6 +177,8 @@ class UserIsolationService {
             // Prepend environment variables to remove GUI access
             command = "env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE -u XDG_RUNTIME_DIR CI=true HEADLESS=true " + command
         }
+
+        command = ResourceLimits.shellCommand(command, openFileLimit: openFileLimit)
 
         process.arguments = [
             "-n", "-u", username,

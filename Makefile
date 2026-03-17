@@ -49,7 +49,7 @@ install: app
 	@rm -rf /Applications/MacRunner.app
 	@cp -r build/MacRunner.app /Applications/
 	@echo "Installed to /Applications/MacRunner.app"
-	@echo "Run: open -a 'Mac Runner'"
+	@echo "Run: open /Applications/MacRunner.app"
 
 # Uninstall
 uninstall:

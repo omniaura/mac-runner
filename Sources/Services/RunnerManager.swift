@@ -21,6 +21,7 @@ class RunnerManager: ObservableObject {
     private var _containerService: Any?  // ContainerIsolationService, but untyped for availability
     #endif
     private var containerServiceInitializationTask: Task<Void, Never>?
+    private var containerServiceInitializationError: Error?
 
     #if canImport(Containerization)
     @available(macOS 26, *)
@@ -36,6 +37,13 @@ class RunnerManager: ObservableObject {
     private var runnersToAutoRestart: Set<UUID> = []
     /// Names reserved by in-flight addRunner calls to prevent duplicate naming race conditions.
     private var pendingRunnerNames: Set<String> = []
+    private var manualStopRequests: Set<UUID> = []
+    private var restartAttemptHistory: [UUID: [Date]] = [:]
+    private var scheduledRestarts: [UUID: Task<Void, Never>] = [:]
+    private var launchTokens: [UUID: UUID] = [:]
+    private let restartWindowSeconds: TimeInterval = 600
+    private let restartBaseDelaySeconds = 5
+    private let restartMaxDelaySeconds = 60
 
     /// Initialize the RunnerManager and restore runtime state.
     ///
@@ -72,11 +80,17 @@ class RunnerManager: ObservableObject {
                 return
             }
             let macRunnerDir = appSupport.appendingPathComponent("MacRunner", isDirectory: true)
-
-            // Kernel path (will need to be provided/downloaded)
-            // For now, use a placeholder - this will be implemented in Phase 5
-            let kernelPath = macRunnerDir.appendingPathComponent("vmlinux")
             let imageStorePath = macRunnerDir.appendingPathComponent("images")
+
+            guard let kernelPath = Self.preferredKernelPath(
+                bundleResourceURL: Bundle.main.resourceURL,
+                applicationSupportURL: macRunnerDir
+            ) else {
+                containerServiceInitializationError = ContainerIsolationError.kernelNotFound(
+                    macRunnerDir.appendingPathComponent("vmlinux")
+                )
+                return
+            }
 
             let service = ContainerIsolationService(
                 kernelPath: kernelPath,
@@ -89,17 +103,38 @@ class RunnerManager: ObservableObject {
                     try await service.initialize()
                     await MainActor.run {
                         self.containerService = service
+                        self.containerServiceInitializationError = nil
                     }
                 } catch {
-                    print("Container isolation not available: \(error.localizedDescription)")
+                    await MainActor.run {
+                        self.containerServiceInitializationError = error
+                    }
                 }
             }
         }
         #endif
     }
 
+    #if canImport(Containerization)
+    nonisolated static func preferredKernelPath(
+        bundleResourceURL: URL?,
+        applicationSupportURL: URL,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> URL? {
+        let candidates = [
+            bundleResourceURL?.appendingPathComponent("vmlinux"),
+            applicationSupportURL.appendingPathComponent("vmlinux")
+        ].compactMap { $0 }
+
+        return candidates.first { fileExists($0.path) }
+    }
+    #endif
+
     deinit {
         statusPollingTask?.cancel()
+        for task in scheduledRestarts.values {
+            task.cancel()
+        }
     }
 
     // MARK: - Configuration
@@ -139,7 +174,12 @@ class RunnerManager: ObservableObject {
     /// - Parameter settings: New application settings to apply
     func updateSettings(_ settings: AppSettings) {
         let loginChanged = settings.startOnLogin != currentSettings.startOnLogin
+        let autoRestartDisabled = currentSettings.autoRestartEnabled && !settings.autoRestartEnabled
+        objectWillChange.send()
         currentSettings = settings
+        if autoRestartDisabled {
+            cancelScheduledRestarts(clearHistory: false)
+        }
         saveConfiguration()
         if loginChanged {
             syncLoginItem()
@@ -150,9 +190,18 @@ class RunnerManager: ObservableObject {
 
     /// Synchronize the macOS login item registration with current settings.
     ///
-    /// Registers or unregisters the app as a login item based on the startOnLogin setting.
+    /// First reconciles the config with the actual OS state (in case the user toggled
+    /// the login item via System Settings), then registers or unregisters as needed.
     private func syncLoginItem() {
         let service = SMAppService.mainApp
+        let osEnabled = service.status == .enabled
+
+        // Reconcile: if OS state disagrees with config, trust the OS
+        if currentSettings.startOnLogin != osEnabled {
+            currentSettings.startOnLogin = osEnabled
+            saveConfiguration()
+        }
+
         do {
             if currentSettings.startOnLogin {
                 if service.status != .enabled {
@@ -205,8 +254,16 @@ class RunnerManager: ObservableObject {
     ///   - labels: Labels to assign to the runner for workflow targeting
     ///   - isolationMode: Optional isolation mode override (nil uses global setting)
     ///   - enableGUI: Whether to enable GUI access for this runner (default: false, headless)
+    ///   - openFileLimit: Optional max open file override (nil uses global setting)
     /// - Throws: RunnerError if validation or setup fails
-    func addRunner(name: String, repo: String, labels: [String], isolationMode: IsolationMode? = nil, enableGUI: Bool = false) async throws {
+    func addRunner(
+        name: String,
+        repo: String,
+        labels: [String],
+        isolationMode: IsolationMode? = nil,
+        enableGUI: Bool = false,
+        openFileLimit: Int? = nil
+    ) async throws {
         isLoading = true
         defer { isLoading = false }
 
@@ -226,7 +283,8 @@ class RunnerManager: ObservableObject {
             enabled: true,
             status: .stopped,
             isolationMode: isolationMode,
-            enableGUI: enableGUI
+            enableGUI: enableGUI,
+            openFileLimit: openFileLimit
         )
 
         // Use per-runner isolation mode if specified, otherwise use global setting
@@ -279,6 +337,11 @@ class RunnerManager: ObservableObject {
 
         // Clean up PID file
         pidManager.removePID(for: id)
+        manualStopRequests.remove(id)
+        launchTokens.removeValue(forKey: id)
+        scheduledRestarts[id]?.cancel()
+        scheduledRestarts.removeValue(forKey: id)
+        restartAttemptHistory.removeValue(forKey: id)
 
         // Remove from list
         runners.removeAll(where: { $0.id == id })
@@ -302,6 +365,10 @@ class RunnerManager: ObservableObject {
         if runnerProcesses[id] != nil || processManager.isProcessAlive(for: id) {
             throw RunnerError.alreadyRunning
         }
+
+        scheduledRestarts[id]?.cancel()
+        scheduledRestarts.removeValue(forKey: id)
+        let launchToken = UUID()
 
         let runner = runners[index]
         // Use per-runner isolation mode if specified, otherwise use global setting
@@ -337,6 +404,9 @@ class RunnerManager: ObservableObject {
                 }
 
                 guard let containerService = containerService else {
+                    if let initializationError = containerServiceInitializationError {
+                        throw initializationError
+                    }
                     throw RunnerError.containerServiceNotAvailable
                 }
 
@@ -352,7 +422,8 @@ class RunnerManager: ObservableObject {
                     enableNestedVirtualization: false,
                     workspaceURL: URL(fileURLWithPath: runnerDir),
                     repositoryURL: runner.repo,
-                    registrationToken: registrationToken
+                    registrationToken: registrationToken,
+                    openFileLimit: runner.effectiveOpenFileLimit(global: currentSettings.openFileLimit)
                 )
 
                 // Create and start container
@@ -364,21 +435,28 @@ class RunnerManager: ObservableObject {
 
                 // Store container reference
                 runnerContainers[id] = container
+                launchTokens[id] = launchToken
 
                 // Monitor container in background
                 Task {
                     do {
                         #if canImport(Containerization)
                         if let linuxContainer = container as? LinuxContainer {
-                            let exitCode = try await linuxContainer.wait()
-                            print("Container \(id.uuidString) exited with code: \(exitCode)")
+                            let exitStatus = try await linuxContainer.wait()
+                            print("Container \(id.uuidString) exited with code: \(exitStatus.exitCode)")
+                            await MainActor.run {
+                                handleRunnerTermination(id, launchToken: launchToken, cause: .containerExit(status: Int(exitStatus.exitCode)))
+                            }
+                        } else {
+                            await MainActor.run {
+                                handleRunnerTermination(id, launchToken: launchToken, cause: .monitoringError(message: "Container handle unavailable"))
+                            }
                         }
                         #endif
-                        await MainActor.run {
-                            handleRunnerTermination(id)
-                        }
                     } catch {
-                        print("Container monitoring error: \(error)")
+                        await MainActor.run {
+                            handleRunnerTermination(id, launchToken: launchToken, cause: .monitoringError(message: error.localizedDescription))
+                        }
                     }
                 }
             } else {
@@ -395,11 +473,26 @@ class RunnerManager: ObservableObject {
                 workingDirectory: runnerDir,
                 logFile: logFile,
                 isolation: isolation,
-                enableGUI: runner.enableGUI
+                enableGUI: runner.enableGUI,
+                openFileLimit: runner.effectiveOpenFileLimit(global: currentSettings.openFileLimit)
             )
 
             // Store process reference for in-memory tracking (GUI)
             runnerProcesses[id] = process
+            launchTokens[id] = launchToken
+
+            process.terminationHandler = { [weak self] terminatedProcess in
+                Task { @MainActor [weak self] in
+                    self?.handleRunnerTermination(
+                        id,
+                        launchToken: launchToken,
+                        cause: .process(
+                            reason: terminatedProcess.terminationReason,
+                            status: terminatedProcess.terminationStatus
+                        )
+                    )
+                }
+            }
         }
 
         runners[index].status = .running
@@ -422,38 +515,50 @@ class RunnerManager: ObservableObject {
         let runner = runners[index]
         // Use per-runner isolation mode if specified, otherwise use global setting
         let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
+        manualStopRequests.insert(id)
 
         // Check if this is a container-based runner
-        if case .container = isolation {
-            #if canImport(Containerization)
-            if #available(macOS 26.0, *) {
-                if let container = runnerContainers[id] {
-                    guard let containerService = containerService else {
-                        throw RunnerError.containerServiceNotAvailable
-                    }
+        do {
+            if case .container = isolation {
+                #if canImport(Containerization)
+                if #available(macOS 26.0, *) {
+                    if let container = runnerContainers[id] {
+                        guard let containerService = containerService else {
+                            throw RunnerError.containerServiceNotAvailable
+                        }
 
-                    // Stop and clean up container
-                    if let linuxContainer = container as? LinuxContainer {
-                        try await containerService.stopContainer(linuxContainer)
+                        // Stop and clean up container
+                        if let linuxContainer = container as? LinuxContainer {
+                            try await containerService.stopContainer(linuxContainer)
+                        }
+                        try await containerService.deleteContainer(id: id.uuidString)
+                        runnerContainers.removeValue(forKey: id)
+                    } else {
+                        throw RunnerError.notRunning
                     }
-                    try await containerService.deleteContainer(id: id.uuidString)
-                    runnerContainers.removeValue(forKey: id)
-                } else {
-                    throw RunnerError.notRunning
+                }
+                #endif
+            } else {
+                // Standard process-based isolation - use ProcessManager
+                let inMemoryProcess = runnerProcesses[id]
+                try processManager.stopProcess(for: id, isolation: isolation, inMemoryProcess: inMemoryProcess)
+
+                if inMemoryProcess != nil {
+                    runnerProcesses.removeValue(forKey: id)
                 }
             }
-            #endif
-        } else {
-            // Standard process-based isolation - use ProcessManager
-            let inMemoryProcess = runnerProcesses[id]
-            try processManager.stopProcess(for: id, isolation: isolation, inMemoryProcess: inMemoryProcess)
-
-            if inMemoryProcess != nil {
-                runnerProcesses.removeValue(forKey: id)
-            }
+        } catch {
+            manualStopRequests.remove(id)
+            throw error
         }
 
+        scheduledRestarts[id]?.cancel()
+        scheduledRestarts.removeValue(forKey: id)
+        restartAttemptHistory.removeValue(forKey: id)
+        launchTokens.removeValue(forKey: id)
+
         runners[index].status = .stopped
+        runners[index].lastRestartEvent = nil
         saveConfiguration()
     }
 
@@ -615,13 +720,14 @@ class RunnerManager: ObservableObject {
         pendingRunnerNames.insert(newName)
         defer { pendingRunnerNames.remove(newName) }
 
-        // Create duplicate with same settings, preserving isolation mode and GUI access
+        // Create duplicate with same settings, preserving isolation mode, GUI access, and resource limits
         try await addRunner(
             name: newName,
             repo: originalRunner.repo,
             labels: originalRunner.labels,
             isolationMode: originalRunner.isolationMode,
-            enableGUI: originalRunner.enableGUI
+            enableGUI: originalRunner.enableGUI,
+            openFileLimit: originalRunner.openFileLimit
         )
     }
 
@@ -641,6 +747,7 @@ class RunnerManager: ObservableObject {
     ///   - count: Number of instances to create (must be >= 1)
     ///   - isolationMode: Optional isolation mode override
     ///   - enableGUI: Whether to enable GUI access
+    ///   - openFileLimit: Optional max open file override
     ///   - onProgress: Called after each runner is created with (completed, total)
     /// - Throws: RunnerError if validation or setup fails for any runner
     func addRunners(
@@ -650,6 +757,7 @@ class RunnerManager: ObservableObject {
         count: Int,
         isolationMode: IsolationMode? = nil,
         enableGUI: Bool = false,
+        openFileLimit: Int? = nil,
         onProgress: ((Int, Int) -> Void)? = nil
     ) async throws {
         guard count >= 1 else { return }
@@ -661,7 +769,8 @@ class RunnerManager: ObservableObject {
                 repo: repo,
                 labels: labels,
                 isolationMode: isolationMode,
-                enableGUI: enableGUI
+                enableGUI: enableGUI,
+                openFileLimit: openFileLimit
             )
             onProgress?(1, 1)
             return
@@ -692,7 +801,8 @@ class RunnerManager: ObservableObject {
                     repo: repo,
                     labels: labels,
                     isolationMode: isolationMode,
-                    enableGUI: enableGUI
+                    enableGUI: enableGUI,
+                    openFileLimit: openFileLimit
                 )
             } catch {
                 errors.append((name: name, error: error))
@@ -709,19 +819,185 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Private Helpers
 
-    /// Handle cleanup when a runner process terminates unexpectedly.
-    ///
-    /// Removes process references, cleans up PID files, and updates the runner status to stopped.
-    ///
-    /// - Parameter id: UUID of the terminated runner
-    private func handleRunnerTermination(_ id: UUID) {
+    private enum RunnerTerminationCause {
+        case process(reason: Process.TerminationReason, status: Int32)
+        case containerExit(status: Int)
+        case monitoringError(message: String)
+
+        var isUnexpected: Bool {
+            switch self {
+            case .process(let reason, let status):
+                return reason != .exit || status != 0
+            case .containerExit(let status):
+                return status != 0
+            case .monitoringError:
+                return true
+            }
+        }
+
+        var description: String {
+            switch self {
+            case .process(let reason, let status):
+                let reasonText = reason == .exit ? "exit" : "signal"
+                return "process \(reasonText), code \(status)"
+            case .containerExit(let status):
+                return "container exit code \(status)"
+            case .monitoringError(let message):
+                return "monitoring error: \(message)"
+            }
+        }
+    }
+
+    /// Handle cleanup when a runner process/container terminates.
+    private func handleRunnerTermination(_ id: UUID, launchToken: UUID, cause: RunnerTerminationCause) {
+        guard launchTokens[id] == launchToken else { return }
+
+        launchTokens.removeValue(forKey: id)
         runnerProcesses.removeValue(forKey: id)
+        runnerContainers.removeValue(forKey: id)
         pidManager.removePID(for: id)
 
+        let wasManualStop = manualStopRequests.remove(id) != nil
+
         if let index = runners.firstIndex(where: { $0.id == id }) {
-            runners[index].status = .stopped
+            if cause.isUnexpected && !wasManualStop {
+                if scheduleAutoRestart(for: id, cause: cause, runnerIndex: index) {
+                    saveConfiguration()
+                    return
+                }
+                runners[index].status = .error
+            } else {
+                runners[index].status = .stopped
+                if wasManualStop {
+                    runners[index].lastRestartEvent = nil
+                }
+            }
             saveConfiguration()
         }
+    }
+
+    private func scheduleAutoRestart(for id: UUID, cause: RunnerTerminationCause, runnerIndex: Int) -> Bool {
+        guard currentSettings.autoRestartEnabled else {
+            scheduledRestarts[id]?.cancel()
+            scheduledRestarts.removeValue(forKey: id)
+            runners[runnerIndex].lastRestartEvent = "Runner crashed (\(cause.description)); auto-restart disabled."
+            logRunnerEvent(for: runners[runnerIndex], message: runners[runnerIndex].lastRestartEvent ?? "")
+            return false
+        }
+
+        let now = Date()
+        var attempts = filteredRestartAttempts(for: id, now: now)
+        let maxRetries = max(1, currentSettings.autoRestartMaxRetries)
+
+        guard attempts.count < maxRetries else {
+            restartAttemptHistory[id] = attempts
+            runners[runnerIndex].lastRestartEvent = "Runner crashed (\(cause.description)); reached max retries (\(maxRetries)) in 10m."
+            logRunnerEvent(for: runners[runnerIndex], message: runners[runnerIndex].lastRestartEvent ?? "")
+            return false
+        }
+
+        attempts.append(now)
+        restartAttemptHistory[id] = attempts
+
+        let attemptNumber = attempts.count
+        let delay = restartDelaySeconds(forAttempt: attemptNumber)
+        runners[runnerIndex].status = .stopped
+        runners[runnerIndex].lastRestartEvent = "Runner crashed (\(cause.description)); restarting in \(delay)s (attempt \(attemptNumber)/\(maxRetries))."
+        logRunnerEvent(for: runners[runnerIndex], message: runners[runnerIndex].lastRestartEvent ?? "")
+
+        scheduledRestarts[id]?.cancel()
+        scheduledRestarts[id] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            await self?.performScheduledRestart(for: id)
+        }
+
+        return true
+    }
+
+    private func restartDelaySeconds(forAttempt attempt: Int) -> Int {
+        guard attempt > 0 else { return restartBaseDelaySeconds }
+        let exponentialDelay = restartBaseDelaySeconds * (1 << (attempt - 1))
+        return min(exponentialDelay, restartMaxDelaySeconds)
+    }
+
+    private func performScheduledRestart(for id: UUID) async {
+        defer { scheduledRestarts.removeValue(forKey: id) }
+
+        guard let runnerIndex = runners.firstIndex(where: { $0.id == id }) else { return }
+        guard currentSettings.autoRestartEnabled else { return }
+        guard runners[runnerIndex].status != .running else { return }
+
+        let attempts = filteredRestartAttempts(for: id, now: Date())
+        guard attempts.count <= max(1, currentSettings.autoRestartMaxRetries) else {
+            runners[runnerIndex].status = .error
+            runners[runnerIndex].lastRestartEvent = "Runner crashed; pending auto-restart cancelled after settings changed."
+            logRunnerEvent(for: runners[runnerIndex], message: runners[runnerIndex].lastRestartEvent ?? "")
+            saveConfiguration()
+            return
+        }
+
+        do {
+            try await startRunner(id)
+            if let refreshedIndex = runners.firstIndex(where: { $0.id == id }) {
+                runners[refreshedIndex].lastRestartEvent = "Runner auto-restarted successfully."
+                logRunnerEvent(for: runners[refreshedIndex], message: runners[refreshedIndex].lastRestartEvent ?? "")
+                saveConfiguration()
+            }
+        } catch {
+            if let refreshedIndex = runners.firstIndex(where: { $0.id == id }) {
+                runners[refreshedIndex].status = .error
+                runners[refreshedIndex].lastRestartEvent = "Auto-restart failed: \(error.localizedDescription)"
+                logRunnerEvent(for: runners[refreshedIndex], message: runners[refreshedIndex].lastRestartEvent ?? "")
+                saveConfiguration()
+            }
+        }
+    }
+
+    private func filteredRestartAttempts(for id: UUID, now: Date) -> [Date] {
+        let cutoff = now.addingTimeInterval(-restartWindowSeconds)
+        let attempts = restartAttemptHistory[id, default: []].filter { $0 >= cutoff }
+        restartAttemptHistory[id] = attempts
+        return attempts
+    }
+
+    private func cancelScheduledRestarts(clearHistory: Bool) {
+        for (id, task) in scheduledRestarts {
+            task.cancel()
+            if clearHistory {
+                restartAttemptHistory.removeValue(forKey: id)
+            }
+        }
+        scheduledRestarts.removeAll()
+    }
+
+    private func logRunnerEvent(for runner: Runner, message: String) {
+        guard !message.isEmpty else { return }
+
+        let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
+        guard let runnerDir = try? RunnerDirectory.path(for: runner.id, isolation: isolation) else {
+            print("[Runner \(runner.name)] \(message)")
+            return
+        }
+
+        let logPath = "\(runnerDir)/runner.log"
+        let formatter = ISO8601DateFormatter()
+        let timestamp = formatter.string(from: Date())
+        let line = "[\(timestamp)] [mac-runner] \(message)\n"
+
+        if !FileManager.default.fileExists(atPath: logPath) {
+            FileManager.default.createFile(atPath: logPath, contents: nil)
+        }
+
+        if let handle = FileHandle(forWritingAtPath: logPath) {
+            handle.seekToEndOfFile()
+            if let data = line.data(using: .utf8) {
+                handle.write(data)
+            }
+            try? handle.close()
+        }
+
+        print("[Runner \(runner.name)] \(message)")
     }
 }
 

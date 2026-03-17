@@ -1,3 +1,26 @@
+# [1.11.0](https://github.com/omniaura/mac-runner/compare/v1.10.2...v1.11.0) (2026-03-16)
+
+
+### Features
+
+* add configurable open file limits ([#59](https://github.com/omniaura/mac-runner/issues/59)) ([ccf366f](https://github.com/omniaura/mac-runner/commit/ccf366feb5224a453a21ee197f4bbae8561d2c74))
+* auto-restart runners after unexpected exits ([#52](https://github.com/omniaura/mac-runner/issues/52)) ([39af616](https://github.com/omniaura/mac-runner/commit/39af61643e7524116f37bf7500d80c19a53c66b1))
+
+## [1.10.2](https://github.com/omniaura/mac-runner/compare/v1.10.1...v1.10.2) (2026-03-16)
+
+
+### Bug Fixes
+
+* pin release runs to their triggering commit ([#58](https://github.com/omniaura/mac-runner/issues/58)) ([4d3dbd8](https://github.com/omniaura/mac-runner/commit/4d3dbd88663cc1c4e57583c347a3fa6207376416))
+
+## [1.10.1](https://github.com/omniaura/mac-runner/compare/v1.10.0...v1.10.1) (2026-03-16)
+
+
+### Bug Fixes
+
+* clean up macOS startup and launch guidance ([#56](https://github.com/omniaura/mac-runner/issues/56)) ([0b1169a](https://github.com/omniaura/mac-runner/commit/0b1169a6e4bdfb04b2b9fc04e26cb916cb6766c6))
+* reconcile Launch at Login checkbox with macOS system state ([#57](https://github.com/omniaura/mac-runner/issues/57)) ([2da139f](https://github.com/omniaura/mac-runner/commit/2da139fa13fe40fbf478d81392745945ce2aa125))
+
 # [1.10.0](https://github.com/omniaura/mac-runner/compare/v1.9.0...v1.10.0) (2026-03-16)
 
 

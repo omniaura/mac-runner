@@ -12,7 +12,7 @@ import Containerization
 /// ## Requirements
 /// - macOS 26.0+
 /// - Apple Silicon (arm64)
-/// - Linux kernel 6.14.9+ (provided by the framework)
+/// - Linux kernel 6.14.9+ (supplied by Mac Runner via a bundled or local `vmlinux`)
 ///
 /// ## Architecture
 /// Each containerized runner runs in its own lightweight VM with:
@@ -42,7 +42,7 @@ class ContainerIsolationService {
     /// Creates a new container isolation service.
     ///
     /// - Parameters:
-    ///   - kernelPath: Path to the Linux kernel binary (vmlinux).
+    ///   - kernelPath: Path to the Linux kernel binary (`vmlinux`) that Mac Runner resolved.
     ///   - imageStorePath: Path to the directory for storing OCI images.
     init(kernelPath: URL, imageStorePath: URL) {
         self.kernelPath = kernelPath
@@ -137,6 +137,7 @@ class ContainerIsolationService {
                 # Configure and start runner
                 cd /runner
                 ./config.sh --unattended --url \(config.repositoryURL) --token \(config.registrationToken)
+                ulimit -n \(config.openFileLimit) 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
                 ./run.sh
                 """
             ]
@@ -309,6 +310,9 @@ struct ContainerRunnerConfiguration {
 
     /// Registration token for the runner.
     var registrationToken: String
+
+    /// Maximum open file limit to set before starting the runner.
+    var openFileLimit: Int = ResourceLimits.defaultOpenFileLimit
 
     /// Default container image for GitHub Actions runners.
     static let defaultRunnerImage = "ghcr.io/actions/runner:latest"

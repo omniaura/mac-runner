@@ -47,7 +47,7 @@ Download the latest DMG from [Releases](https://github.com/omniaura/mac-runner/r
 
 ### GUI
 
-1. Launch Mac Runner — appears in menu bar
+1. Launch Mac Runner from Applications or run `open /Applications/MacRunner.app` — it appears in the menu bar
 2. Click "Add Runner"
 3. Browse your repos (fetched via `gh`), pick one
 4. Runner downloads, configures, registers, and starts automatically
