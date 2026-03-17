@@ -1,6 +1,7 @@
 import XCTest
 @testable import MacRunner
 
+@MainActor
 final class UpdateCheckerTests: XCTestCase {
     private var defaults: UserDefaults!
 

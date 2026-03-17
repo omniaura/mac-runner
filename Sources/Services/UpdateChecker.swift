@@ -87,6 +87,7 @@ struct HTTPResponse: Sendable {
     let statusCode: Int
 }
 
+@MainActor
 final class UpdateChecker {
     typealias FetchLatestRelease = (URLRequest) async throws -> HTTPResponse
 
