@@ -6,6 +6,46 @@ final class MacRunnerTests: XCTestCase {
         XCTAssertTrue(true)
     }
 
+    func testDetectedIsolationUsernameUsesConfiguredDedicatedUser() {
+        let username = SetupWizard.detectedIsolationUsername(
+            configuredIsolationMode: .dedicatedUser(username: "_customrunner"),
+            userExists: { _ in false },
+            hasSudoersEntry: { false }
+        )
+
+        XCTAssertEqual(username, "_customrunner")
+    }
+
+    func testDetectedIsolationUsernameFallsBackToDefaultUserWhenArtifactsExist() {
+        let username = SetupWizard.detectedIsolationUsername(
+            configuredIsolationMode: .none,
+            userExists: { $0 == IsolationMode.defaultUsername },
+            hasSudoersEntry: { false }
+        )
+
+        XCTAssertEqual(username, IsolationMode.defaultUsername)
+    }
+
+    func testDetectedIsolationUsernameFallsBackToDefaultUserWhenSudoersExists() {
+        let username = SetupWizard.detectedIsolationUsername(
+            configuredIsolationMode: .none,
+            userExists: { _ in false },
+            hasSudoersEntry: { true }
+        )
+
+        XCTAssertEqual(username, IsolationMode.defaultUsername)
+    }
+
+    func testDetectedIsolationUsernameReturnsNilWithoutConfigOrArtifacts() {
+        let username = SetupWizard.detectedIsolationUsername(
+            configuredIsolationMode: .none,
+            userExists: { _ in false },
+            hasSudoersEntry: { false }
+        )
+
+        XCTAssertNil(username)
+    }
+
     func testCLIHandlerVersionFallsBackToEnclosingAppBundleVersion() {
         let temporaryDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -45,5 +85,15 @@ final class MacRunnerTests: XCTestCase {
             CLIHandler.enclosingAppBundleURL(for: executableURL)?.path,
             "/Applications/MacRunner.app"
         )
+    }
+
+    func testAdministratorAuthenticationProcessUsesInteractiveTerminalHandles() {
+        let process = UserIsolationService.makeAdministratorAuthenticationProcess()
+
+        XCTAssertEqual(process.executableURL?.path, "/usr/bin/sudo")
+        XCTAssertEqual(process.arguments, ["-v"])
+        XCTAssertNotNil(process.standardInput)
+        XCTAssertNotNil(process.standardOutput)
+        XCTAssertNotNil(process.standardError)
     }
 }
