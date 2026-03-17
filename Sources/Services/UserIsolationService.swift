@@ -275,9 +275,7 @@ class UserIsolationService {
     }
 
     func authenticateAdministratorAccess() throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-        process.arguments = ["-v"]
+        let process = Self.makeAdministratorAuthenticationProcess()
 
         try process.run()
         process.waitUntilExit()
@@ -285,6 +283,20 @@ class UserIsolationService {
         guard process.terminationStatus == 0 else {
             throw IsolationError.authenticationFailed("sudo authentication was cancelled or failed")
         }
+    }
+
+    static func makeAdministratorAuthenticationProcess(
+        standardInput: Any? = FileHandle.standardInput,
+        standardOutput: Any? = FileHandle.standardOutput,
+        standardError: Any? = FileHandle.standardError
+    ) -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+        process.arguments = ["-v"]
+        process.standardInput = standardInput
+        process.standardOutput = standardOutput
+        process.standardError = standardError
+        return process
     }
 
     private func runAuthenticatedSudoOrThrow(arguments: [String], errorMessage: String) throws {
