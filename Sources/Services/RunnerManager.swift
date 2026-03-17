@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Combine
 import ServiceManagement
@@ -11,12 +12,16 @@ class RunnerManager: ObservableObject {
     @Published var runners: [Runner] = []
     @Published var isLoading = false
     @Published var error: String?
+    @Published private(set) var availableUpdate: AvailableUpdate?
+    @Published private(set) var isCheckingForUpdates = false
+    @Published private(set) var updateStatusMessage = "Checks GitHub releases on launch and once per day."
 
     private let configService = ConfigService()
     private let ghService = GHCLIService.shared
     private let isolationService = UserIsolationService.shared
     private let processManager = ProcessManager()
     private let pidManager = PIDFileManager()
+    private let updateChecker = UpdateChecker()
     #if canImport(Containerization)
     private var _containerService: Any?  // ContainerIsolationService, but untyped for availability
     #endif
@@ -52,6 +57,11 @@ class RunnerManager: ObservableObject {
     /// login item registration, and starts status polling.
     init() {
         loadConfiguration()
+        availableUpdate = updateChecker.storedAvailableUpdate(
+            currentVersion: CLIHandler.version,
+            bundlePath: Bundle.main.bundlePath
+        )
+        refreshUpdateStatusMessage()
         initializeContainerService()
 
         // Before reconciling, capture runners that were running but whose
@@ -181,8 +191,80 @@ class RunnerManager: ObservableObject {
             cancelScheduledRestarts(clearHistory: false)
         }
         saveConfiguration()
+        refreshUpdateStatusMessage()
         if loginChanged {
             syncLoginItem()
+        }
+    }
+
+    func checkForUpdates(force: Bool = false) async {
+        guard !isCheckingForUpdates else { return }
+
+        if !force && !currentSettings.autoCheckForUpdates {
+            availableUpdate = updateChecker.storedAvailableUpdate(
+                currentVersion: CLIHandler.version,
+                bundlePath: Bundle.main.bundlePath
+            )
+            refreshUpdateStatusMessage()
+            return
+        }
+
+        isCheckingForUpdates = true
+        updateStatusMessage = "Checking for updates..."
+        defer { isCheckingForUpdates = false }
+
+        do {
+            let result = try await updateChecker.checkForUpdates(
+                currentVersion: CLIHandler.version,
+                bundlePath: Bundle.main.bundlePath,
+                allowsAutomaticChecks: currentSettings.autoCheckForUpdates,
+                force: force
+            )
+
+            switch result {
+            case .skipped(let cachedUpdate):
+                availableUpdate = cachedUpdate
+                if cachedUpdate != nil {
+                    updateStatusMessage = "Showing the last known available update."
+                } else if currentSettings.autoCheckForUpdates {
+                    updateStatusMessage = "Already checked within the last 24 hours."
+                } else {
+                    updateStatusMessage = "Automatic update checks are off."
+                }
+            case .upToDate:
+                availableUpdate = nil
+                updateStatusMessage = "Mac Runner is up to date."
+            case .updateAvailable(let update):
+                availableUpdate = update
+                updateStatusMessage = "Version \(update.latestVersion) is available."
+            }
+        } catch {
+            if availableUpdate != nil {
+                updateStatusMessage = "Update check failed. Showing the last known release."
+            } else {
+                updateStatusMessage = "Update check failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func openUpdate() {
+        guard let availableUpdate else { return }
+
+        if availableUpdate.installSource == .homebrew {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString("brew upgrade --cask mac-runner", forType: .string)
+        }
+
+        NSWorkspace.shared.open(availableUpdate.releaseURL)
+    }
+
+    private func refreshUpdateStatusMessage() {
+        if let availableUpdate {
+            updateStatusMessage = "Version \(availableUpdate.latestVersion) is available."
+        } else if currentSettings.autoCheckForUpdates {
+            updateStatusMessage = "Checks GitHub releases on launch and once per day."
+        } else {
+            updateStatusMessage = "Automatic update checks are off."
         }
     }
 

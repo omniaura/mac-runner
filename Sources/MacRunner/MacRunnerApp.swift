@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 
 extension Notification.Name {
     static let openSettings = Notification.Name("openSettings")
@@ -21,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var popover: NSPopover!
     let runnerManager = RunnerManager()
     private var settingsWindow: NSWindow?
+    private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -28,13 +30,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "figure.run", accessibilityDescription: "Mac Runner")
             button.action = #selector(togglePopover)
             button.target = self
         }
+        updateStatusItemIcon()
 
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 300, height: 400)
+        popover.contentSize = NSSize(width: 300, height: 430)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(
             rootView: MenuBarView().environmentObject(runnerManager)
@@ -47,7 +49,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
+        runnerManager.$availableUpdate
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateStatusItemIcon()
+            }
+            .store(in: &cancellables)
+
         Task { await runnerManager.autoRestartRunners() }
+        Task { await runnerManager.checkForUpdates() }
+    }
+
+    private func updateStatusItemIcon() {
+        guard let button = statusItem.button else { return }
+
+        let symbolName = runnerManager.availableUpdate == nil ? "figure.run" : "arrow.down.circle.fill"
+        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Mac Runner")
     }
 
     @objc func togglePopover() {
