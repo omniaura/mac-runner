@@ -57,10 +57,12 @@ class RunnerManager: ObservableObject {
     /// login item registration, and starts status polling.
     init() {
         loadConfiguration()
-        availableUpdate = updateChecker.storedAvailableUpdate(
-            currentVersion: CLIHandler.version,
-            bundlePath: Bundle.main.bundlePath
-        )
+        availableUpdate = currentSettings.autoCheckForUpdates
+            ? updateChecker.storedAvailableUpdate(
+                currentVersion: CLIHandler.version,
+                bundlePath: Bundle.main.bundlePath
+            )
+            : nil
         refreshUpdateStatusMessage()
         initializeContainerService()
 
@@ -190,6 +192,9 @@ class RunnerManager: ObservableObject {
         if autoRestartDisabled {
             cancelScheduledRestarts(clearHistory: false)
         }
+        if !settings.autoCheckForUpdates {
+            availableUpdate = nil
+        }
         saveConfiguration()
         refreshUpdateStatusMessage()
         if loginChanged {
@@ -201,10 +206,7 @@ class RunnerManager: ObservableObject {
         guard !isCheckingForUpdates else { return }
 
         if !force && !currentSettings.autoCheckForUpdates {
-            availableUpdate = updateChecker.storedAvailableUpdate(
-                currentVersion: CLIHandler.version,
-                bundlePath: Bundle.main.bundlePath
-            )
+            availableUpdate = nil
             refreshUpdateStatusMessage()
             return
         }
@@ -250,9 +252,9 @@ class RunnerManager: ObservableObject {
     func openUpdate() {
         guard let availableUpdate else { return }
 
-        if availableUpdate.installSource == .homebrew {
+        if let upgradeCommand = availableUpdate.upgradeCommand {
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString("brew upgrade --cask mac-runner", forType: .string)
+            NSPasteboard.general.setString(upgradeCommand, forType: .string)
         }
 
         NSWorkspace.shared.open(availableUpdate.releaseURL)

@@ -47,7 +47,8 @@ struct SemanticVersion: Comparable, Sendable {
 }
 
 enum UpdateInstallSource: Sendable, Equatable {
-    case homebrew
+    case homebrewFormula
+    case homebrewCask
     case directDownload
 }
 
@@ -59,16 +60,29 @@ struct AvailableUpdate: Sendable, Equatable {
 
     var actionTitle: String {
         switch installSource {
-        case .homebrew:
+        case .homebrewFormula, .homebrewCask:
             return "Upgrade via Homebrew"
         case .directDownload:
             return "Open Release Page"
         }
     }
 
+    var upgradeCommand: String? {
+        switch installSource {
+        case .homebrewFormula:
+            return "brew upgrade mac-runner"
+        case .homebrewCask:
+            return "brew upgrade --cask mac-runner"
+        case .directDownload:
+            return nil
+        }
+    }
+
     var detailText: String {
         switch installSource {
-        case .homebrew:
+        case .homebrewFormula:
+            return "Use brew upgrade mac-runner"
+        case .homebrewCask:
             return "Use brew upgrade --cask mac-runner"
         case .directDownload:
             return "Download the latest DMG from GitHub Releases"
@@ -152,18 +166,25 @@ final class UpdateChecker {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
-        let response = try await fetchLatestRelease(request)
-        guard (200...299).contains(response.statusCode) else {
-            throw NSError(
-                domain: "UpdateChecker",
-                code: response.statusCode,
-                userInfo: [NSLocalizedDescriptionKey: "GitHub update check failed with status \(response.statusCode)"]
-            )
-        }
+        let checkedAt = now()
 
-        let latestRelease = try JSONDecoder().decode(LatestRelease.self, from: response.data)
-        store(latestRelease, checkedAt: now())
-        return result(for: latestRelease, currentVersion: currentVersion, bundlePath: bundlePath)
+        do {
+            let response = try await fetchLatestRelease(request)
+            guard (200...299).contains(response.statusCode) else {
+                throw NSError(
+                    domain: "UpdateChecker",
+                    code: response.statusCode,
+                    userInfo: [NSLocalizedDescriptionKey: "GitHub update check failed with status \(response.statusCode)"]
+                )
+            }
+
+            let latestRelease = try JSONDecoder().decode(LatestRelease.self, from: response.data)
+            store(latestRelease, checkedAt: checkedAt)
+            return result(for: latestRelease, currentVersion: currentVersion, bundlePath: bundlePath)
+        } catch {
+            storeFailedCheck(at: checkedAt)
+            throw error
+        }
     }
 
     func storedAvailableUpdate(currentVersion: String, bundlePath: String) -> AvailableUpdate? {
@@ -174,9 +195,23 @@ final class UpdateChecker {
         return update
     }
 
-    static func installSource(for bundlePath: String) -> UpdateInstallSource {
+    static func installSource(
+        for bundlePath: String,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> UpdateInstallSource {
         if bundlePath.contains("/usr/local/Cellar/") || bundlePath.contains("/opt/homebrew/Cellar/") {
-            return .homebrew
+            return .homebrewFormula
+        }
+
+        if bundlePath.hasSuffix("/Mac Runner.app") {
+            let caskReceipts = [
+                "/opt/homebrew/Caskroom/mac-runner",
+                "/usr/local/Caskroom/mac-runner"
+            ]
+
+            if caskReceipts.contains(where: fileExists) {
+                return .homebrewCask
+            }
         }
 
         return .directDownload
@@ -216,10 +251,22 @@ final class UpdateChecker {
         userDefaults.set(try? JSONEncoder().encode(latestRelease), forKey: cachedReleaseKey)
     }
 
+    private func storeFailedCheck(at checkedAt: Date) {
+        userDefaults.set(checkedAt, forKey: lastCheckedAtKey)
+    }
+
     private func result(for latestRelease: LatestRelease, currentVersion: String, bundlePath: String) -> UpdateCheckResult {
-        guard let latestVersion = SemanticVersion(latestRelease.tagName),
-              let installedVersion = SemanticVersion(currentVersion),
-              latestVersion > installedVersion else {
+        guard let latestVersion = SemanticVersion(latestRelease.tagName) else {
+            print("Warning: Failed to parse latest release version '\(latestRelease.tagName)' during update check")
+            return .upToDate
+        }
+
+        guard let installedVersion = SemanticVersion(currentVersion) else {
+            print("Warning: Failed to parse installed version '\(currentVersion)' during update check")
+            return .upToDate
+        }
+
+        guard latestVersion > installedVersion else {
             return .upToDate
         }
 

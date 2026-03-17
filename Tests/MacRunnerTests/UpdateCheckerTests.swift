@@ -17,18 +17,14 @@ final class UpdateCheckerTests: XCTestCase {
         super.tearDown()
     }
 
-    func testSemanticVersionComparisonUsesNumericOrdering() {
-        let lowerVersion = try? XCTUnwrap(SemanticVersion("1.9.0"))
-        let higherVersion = try? XCTUnwrap(SemanticVersion("1.10.0"))
-        let normalizedVersion = try? XCTUnwrap(SemanticVersion("v1.2.0"))
-        let shorthandVersion = try? XCTUnwrap(SemanticVersion("1.2"))
+    func testSemanticVersionComparisonUsesNumericOrdering() throws {
+        let lowerVersion = try XCTUnwrap(SemanticVersion("1.9.0"))
+        let higherVersion = try XCTUnwrap(SemanticVersion("1.10.0"))
+        let normalizedVersion = try XCTUnwrap(SemanticVersion("v1.2.0"))
+        let shorthandVersion = try XCTUnwrap(SemanticVersion("1.2"))
 
-        XCTAssertNotNil(lowerVersion)
-        XCTAssertNotNil(higherVersion)
-        XCTAssertNotNil(normalizedVersion)
-        XCTAssertNotNil(shorthandVersion)
-        XCTAssertLessThan(lowerVersion!, higherVersion!)
-        XCTAssertEqual(normalizedVersion!, shorthandVersion!)
+        XCTAssertLessThan(lowerVersion, higherVersion)
+        XCTAssertEqual(normalizedVersion, shorthandVersion)
     }
 
     func testAutomaticCheckReusesStoredReleaseWithinDailyWindow() async throws {
@@ -100,8 +96,54 @@ final class UpdateCheckerTests: XCTestCase {
     }
 
     func testHomebrewInstallDetectionUsesCellarPaths() {
-        XCTAssertEqual(UpdateChecker.installSource(for: "/opt/homebrew/Cellar/mac-runner/1.2.3/Mac Runner.app"), .homebrew)
+        XCTAssertEqual(UpdateChecker.installSource(for: "/opt/homebrew/Cellar/mac-runner/1.2.3/Mac Runner.app"), .homebrewFormula)
         XCTAssertEqual(UpdateChecker.installSource(for: "/Applications/Mac Runner.app"), .directDownload)
+    }
+
+    func testHomebrewInstallDetectionUsesCaskReceipt() {
+        XCTAssertEqual(
+            UpdateChecker.installSource(
+                for: "/Applications/Mac Runner.app",
+                fileExists: { $0 == "/opt/homebrew/Caskroom/mac-runner" }
+            ),
+            .homebrewCask
+        )
+    }
+
+    func testFailedAutomaticCheckStillAppliesDailyBackoff() async throws {
+        var currentDate = Date(timeIntervalSince1970: 3_000)
+        var fetchCount = 0
+        let checker = UpdateChecker(
+            userDefaults: defaults,
+            now: { currentDate },
+            fetchLatestRelease: { _ in
+                fetchCount += 1
+                struct TestError: Error {}
+                throw TestError()
+            }
+        )
+
+        await XCTAssertThrowsErrorAsync {
+            try await checker.checkForUpdates(
+                currentVersion: "1.0.0",
+                bundlePath: "/Applications/Mac Runner.app",
+                allowsAutomaticChecks: true
+            )
+        }
+
+        currentDate = currentDate.addingTimeInterval(10 * 60)
+
+        let result = try await checker.checkForUpdates(
+            currentVersion: "1.0.0",
+            bundlePath: "/Applications/Mac Runner.app",
+            allowsAutomaticChecks: true
+        )
+
+        XCTAssertEqual(fetchCount, 1)
+        guard case .skipped(let cachedUpdate) = result else {
+            return XCTFail("Expected a skipped result after failed backoff")
+        }
+        XCTAssertNil(cachedUpdate)
     }
 
     private static func latestReleaseData(tag: String) -> Data {
@@ -111,5 +153,18 @@ final class UpdateCheckerTests: XCTestCase {
             "html_url": "https://github.com/omniaura/mac-runner/releases/tag/\(tag)"
         }
         """.data(using: .utf8)!
+    }
+}
+
+private func XCTAssertThrowsErrorAsync<T>(
+    _ expression: @escaping () async throws -> T,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        _ = try await expression()
+        XCTFail("Expected error to be thrown", file: file, line: line)
+    } catch {
+        // Expected.
     }
 }
