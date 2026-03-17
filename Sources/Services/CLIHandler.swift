@@ -2,9 +2,50 @@ import Foundation
 
 enum CLIHandler {
     static var version: String {
-        // Read version from app bundle Info.plist (set during build)
-        // Fallback to "dev" if not found (for local development)
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        version(executablePath: CommandLine.arguments.first)
+    }
+
+    static func version(executablePath: String?, mainBundle: Bundle = .main) -> String {
+        if let bundledVersion = bundleVersion(from: mainBundle) {
+            return bundledVersion
+        }
+
+        guard let executablePath else {
+            return "dev"
+        }
+
+        let executableURL = URL(fileURLWithPath: executablePath).resolvingSymlinksInPath()
+
+        if let appBundleURL = enclosingAppBundleURL(for: executableURL),
+           let appBundle = Bundle(url: appBundleURL),
+           let bundledVersion = bundleVersion(from: appBundle) {
+            return bundledVersion
+        }
+
+        return "dev"
+    }
+
+    private static func bundleVersion(from bundle: Bundle) -> String? {
+        bundle.infoDictionary?["CFBundleShortVersionString"] as? String
+    }
+
+    static func enclosingAppBundleURL(for executableURL: URL) -> URL? {
+        var currentURL = executableURL.deletingLastPathComponent()
+
+        while currentURL.path != "/" {
+            if currentURL.pathExtension == "app" {
+                return currentURL
+            }
+
+            let parentURL = currentURL.deletingLastPathComponent()
+            if parentURL == currentURL {
+                break
+            }
+
+            currentURL = parentURL
+        }
+
+        return nil
     }
 
     @MainActor
