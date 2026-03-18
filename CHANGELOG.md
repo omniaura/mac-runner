@@ -1,3 +1,10 @@
+# [1.12.0](https://github.com/omniaura/mac-runner/compare/v1.11.1...v1.12.0) (2026-03-18)
+
+
+### Features
+
+* add cached app update checks ([#61](https://github.com/omniaura/mac-runner/issues/61)) ([0133913](https://github.com/omniaura/mac-runner/commit/0133913f5d5b7dc7caf09abcc100e9d68a4b1e1a))
+
 ## [1.11.1](https://github.com/omniaura/mac-runner/compare/v1.11.0...v1.11.1) (2026-03-17)
 
 
