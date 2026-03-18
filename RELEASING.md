@@ -146,14 +146,17 @@ Code signing and notarization are fully automated in the release workflow. The a
 | `APPLE_CERTIFICATE_BASE64` | Base64-encoded `.p12` Developer ID Application certificate |
 | `APPLE_CERTIFICATE_PASSWORD` | Password for the `.p12` file |
 | `APPLE_TEAM_ID` | 10-character Apple Developer Team ID |
-| `APPLE_ID` | Apple ID email used for notarization |
-| `APPLE_ID_PASSWORD` | App-specific password for notarization (generate at appleid.apple.com) |
+| `APPLE_API_KEY_BASE64` | Preferred: base64-encoded App Store Connect API key (`.p8`) for notarization |
+| `APPLE_API_KEY_ID` | Preferred: App Store Connect API key ID |
+| `APPLE_API_ISSUER_ID` | Preferred: App Store Connect issuer ID |
+| `APPLE_ID` | Optional fallback: Apple ID email used for notarization |
+| `APPLE_ID_PASSWORD` | Optional fallback: app-specific password for notarization |
 
 ### How it works
 
-1. A temporary keychain is created and the signing certificate is imported
-2. The app bundle binary and `.app` are signed with `codesign --options runtime`
-3. The signed ZIP is submitted to Apple for notarization via `xcrun notarytool`
-4. The notarization ticket is stapled to the app and the ZIP is re-created
-5. The DMG is created from the stapled app, then signed and notarized separately
-6. The temporary keychain is cleaned up
+1. A temporary keychain is created, the Developer ID certificate is imported, and the signing identity is discovered dynamically
+2. The workflow clears extended attributes, signs nested bundles bottom-up, signs the main executable, and then signs the `.app`
+3. The release ZIP is created with `ditto --keepParent` so macOS metadata survives notarization round-trips
+4. Notarization uses an App Store Connect API key when configured, falls back to Apple ID credentials otherwise, and prints Apple log output on failure
+5. The app and DMG are both stapled and validated after notarization before release artifacts are uploaded
+6. Temporary keychain and notarization key material are cleaned up at the end of the job
