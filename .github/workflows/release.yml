@@ -211,7 +211,7 @@ jobs:
             -path '*/Contents/XPCServices/*.xpc' -o \
             -path '*/Contents/Helpers/*' -o \
             -path '*/Contents/Library/LoginItems/*.app' \
-          \) -depth | sort)
+          \) -depth)
 
           echo "Signing the binary..."
           codesign --force --options runtime \
@@ -252,50 +252,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          submit_for_notarization() {
-            local artifact="$1"
-            local result submission_id status
-
-            if [ -n "${NOTARY_API_KEY_PATH:-}" ] && [ -n "${APPLE_API_KEY_ID:-}" ] && [ -n "${APPLE_API_ISSUER_ID:-}" ]; then
-              result="$(xcrun notarytool submit "$artifact" \
-                --key "$NOTARY_API_KEY_PATH" \
-                --key-id "$APPLE_API_KEY_ID" \
-                --issuer "$APPLE_API_ISSUER_ID" \
-                --wait \
-                --output-format json)"
-            else
-              result="$(xcrun notarytool submit "$artifact" \
-                --apple-id "$APPLE_ID" \
-                --password "$APPLE_ID_PASSWORD" \
-                --team-id "$APPLE_TEAM_ID" \
-                --wait \
-                --output-format json)"
-            fi
-
-            status="$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status", ""))')"
-            submission_id="$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id", ""))')"
-
-            if [ "$status" != "Accepted" ]; then
-              echo "Notarization failed for $artifact with status: $status"
-              if [ -n "$submission_id" ]; then
-                if [ -n "${NOTARY_API_KEY_PATH:-}" ] && [ -n "${APPLE_API_KEY_ID:-}" ] && [ -n "${APPLE_API_ISSUER_ID:-}" ]; then
-                  xcrun notarytool log "$submission_id" \
-                    --key "$NOTARY_API_KEY_PATH" \
-                    --key-id "$APPLE_API_KEY_ID" \
-                    --issuer "$APPLE_API_ISSUER_ID"
-                else
-                  xcrun notarytool log "$submission_id" \
-                    --apple-id "$APPLE_ID" \
-                    --password "$APPLE_ID_PASSWORD" \
-                    --team-id "$APPLE_TEAM_ID"
-                fi
-              fi
-              exit 1
-            fi
-          }
-
           echo "Submitting ZIP for notarization..."
-          submit_for_notarization "build/MacRunner-${VERSION}.zip"
+          ./scripts/notarize.sh "build/MacRunner-${VERSION}.zip"
 
           echo "Stapling notarization ticket to app..."
           xcrun stapler staple build/MacRunner.app
@@ -350,53 +308,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          submit_for_notarization() {
-            local artifact="$1"
-            local result submission_id status
-
-            if [ -n "${NOTARY_API_KEY_PATH:-}" ] && [ -n "${APPLE_API_KEY_ID:-}" ] && [ -n "${APPLE_API_ISSUER_ID:-}" ]; then
-              result="$(xcrun notarytool submit "$artifact" \
-                --key "$NOTARY_API_KEY_PATH" \
-                --key-id "$APPLE_API_KEY_ID" \
-                --issuer "$APPLE_API_ISSUER_ID" \
-                --wait \
-                --output-format json)"
-            else
-              result="$(xcrun notarytool submit "$artifact" \
-                --apple-id "$APPLE_ID" \
-                --password "$APPLE_ID_PASSWORD" \
-                --team-id "$APPLE_TEAM_ID" \
-                --wait \
-                --output-format json)"
-            fi
-
-            status="$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status", ""))')"
-            submission_id="$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id", ""))')"
-
-            if [ "$status" != "Accepted" ]; then
-              echo "Notarization failed for $artifact with status: $status"
-              if [ -n "$submission_id" ]; then
-                if [ -n "${NOTARY_API_KEY_PATH:-}" ] && [ -n "${APPLE_API_KEY_ID:-}" ] && [ -n "${APPLE_API_ISSUER_ID:-}" ]; then
-                  xcrun notarytool log "$submission_id" \
-                    --key "$NOTARY_API_KEY_PATH" \
-                    --key-id "$APPLE_API_KEY_ID" \
-                    --issuer "$APPLE_API_ISSUER_ID"
-                else
-                  xcrun notarytool log "$submission_id" \
-                    --apple-id "$APPLE_ID" \
-                    --password "$APPLE_ID_PASSWORD" \
-                    --team-id "$APPLE_TEAM_ID"
-                fi
-              fi
-              exit 1
-            fi
-          }
-
           echo "Signing DMG..."
           codesign --force --sign "$SIGNING_IDENTITY" --timestamp "build/MacRunner-${VERSION}.dmg"
 
           echo "Submitting DMG for notarization..."
-          submit_for_notarization "build/MacRunner-${VERSION}.dmg"
+          ./scripts/notarize.sh "build/MacRunner-${VERSION}.dmg"
 
           echo "Stapling notarization ticket to DMG..."
           xcrun stapler staple "build/MacRunner-${VERSION}.dmg"
@@ -406,8 +322,10 @@ jobs:
       - name: Clean up signing keychain
         if: always()
         run: |
-          rm -f "$NOTARY_API_KEY_PATH"
-          if [ -n "$KEYCHAIN_PATH" ] && security list-keychains | grep -q "signing.keychain-db"; then
+          if [ -n "${NOTARY_API_KEY_PATH:-}" ]; then
+            rm -f "$NOTARY_API_KEY_PATH"
+          fi
+          if [ -n "${KEYCHAIN_PATH:-}" ] && security list-keychains | grep -q "signing.keychain-db"; then
             security delete-keychain "$KEYCHAIN_PATH"
             echo "Temporary keychain removed."
           fi
