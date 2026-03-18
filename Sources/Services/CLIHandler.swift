@@ -14,7 +14,15 @@ enum CLIHandler {
             return "dev"
         }
 
-        let executableURL = URL(fileURLWithPath: executablePath).resolvingSymlinksInPath()
+        let resolvedPath: String
+        if !executablePath.contains("/"),
+           let pathResolved = resolveFromPATH(executablePath) {
+            resolvedPath = pathResolved
+        } else {
+            resolvedPath = executablePath
+        }
+
+        let executableURL = URL(fileURLWithPath: resolvedPath).resolvingSymlinksInPath()
 
         if let appBundleURL = enclosingAppBundleURL(for: executableURL),
            let appBundle = Bundle(url: appBundleURL),
@@ -23,6 +31,17 @@ enum CLIHandler {
         }
 
         return "dev"
+    }
+
+    private static func resolveFromPATH(_ name: String) -> String? {
+        guard let pathEnv = ProcessInfo.processInfo.environment["PATH"] else { return nil }
+        for dir in pathEnv.split(separator: ":") {
+            let candidate = "\(dir)/\(name)"
+            if FileManager.default.fileExists(atPath: candidate) {
+                return candidate
+            }
+        }
+        return nil
     }
 
     private static func bundleVersion(from bundle: Bundle) -> String? {
