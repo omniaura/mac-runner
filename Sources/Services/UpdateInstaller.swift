@@ -31,7 +31,7 @@ enum UpdateInstallerError: LocalizedError, Equatable {
     }
 }
 
-final class UpdateInstaller {
+struct UpdateInstaller: Sendable {
     typealias FileExists = @Sendable (String) -> Bool
     typealias RunCommand = @Sendable (String, [String]) async throws -> UpdateInstallerCommandResult
 
