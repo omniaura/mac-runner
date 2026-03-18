@@ -228,10 +228,8 @@ class RunnerManager: ObservableObject {
                 availableUpdate = cachedUpdate
                 if cachedUpdate != nil {
                     updateStatusMessage = "Showing the last known available update."
-                } else if currentSettings.autoCheckForUpdates {
-                    updateStatusMessage = "Already checked within the last 24 hours."
                 } else {
-                    updateStatusMessage = "Automatic update checks are off."
+                    updateStatusMessage = "Already checked within the last 24 hours."
                 }
             case .upToDate:
                 availableUpdate = nil
