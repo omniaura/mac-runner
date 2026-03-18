@@ -9,12 +9,18 @@ import Containerization
 
 @MainActor
 class RunnerManager: ObservableObject {
+    private enum UpdateStatusMessages {
+        static let defaultAutomaticChecks = "Checks GitHub releases on launch and once per day."
+        static let alreadyChecking = "Update check already in progress."
+        static let checking = "Checking for updates..."
+    }
+
     @Published var runners: [Runner] = []
     @Published var isLoading = false
     @Published var error: String?
     @Published private(set) var availableUpdate: AvailableUpdate?
     @Published private(set) var isCheckingForUpdates = false
-    @Published private(set) var updateStatusMessage = "Checks GitHub releases on launch and once per day."
+    @Published private(set) var updateStatusMessage = UpdateStatusMessages.defaultAutomaticChecks
 
     private let configService = ConfigService()
     private let ghService = GHCLIService.shared
@@ -203,7 +209,10 @@ class RunnerManager: ObservableObject {
     }
 
     func checkForUpdates(force: Bool = false) async {
-        guard !isCheckingForUpdates else { return }
+        guard !isCheckingForUpdates else {
+            updateStatusMessage = UpdateStatusMessages.alreadyChecking
+            return
+        }
 
         if !force && !currentSettings.autoCheckForUpdates {
             availableUpdate = nil
@@ -212,7 +221,7 @@ class RunnerManager: ObservableObject {
         }
 
         isCheckingForUpdates = true
-        updateStatusMessage = "Checking for updates..."
+        updateStatusMessage = UpdateStatusMessages.checking
         defer { isCheckingForUpdates = false }
 
         do {
@@ -262,7 +271,7 @@ class RunnerManager: ObservableObject {
         if let availableUpdate {
             updateStatusMessage = "Version \(availableUpdate.latestVersion) is available."
         } else if currentSettings.autoCheckForUpdates {
-            updateStatusMessage = "Checks GitHub releases on launch and once per day."
+            updateStatusMessage = UpdateStatusMessages.defaultAutomaticChecks
         } else {
             updateStatusMessage = "Automatic update checks are off."
         }
