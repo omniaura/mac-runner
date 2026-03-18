@@ -40,7 +40,7 @@ final class UpdateInstaller {
 
     init(
         fileExists: @escaping FileExists = { FileManager.default.isExecutableFile(atPath: $0) },
-        runCommand: @escaping RunCommand = Self.liveRunCommand
+        runCommand: @escaping RunCommand = UpdateInstaller.liveRunCommand
     ) {
         self.fileExists = fileExists
         self.runCommand = runCommand
