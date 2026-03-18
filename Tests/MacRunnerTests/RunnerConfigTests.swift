@@ -12,6 +12,7 @@ final class RunnerConfigTests: XCTestCase {
         XCTAssertEqual(config.runners.count, 0)
         XCTAssertEqual(config.settings.isolationMode, .none)
         XCTAssertEqual(config.settings.startOnLogin, false)
+        XCTAssertEqual(config.settings.autoCheckForUpdates, true)
         XCTAssertEqual(config.settings.openFileLimit, ResourceLimits.defaultOpenFileLimit)
     }
 
@@ -79,6 +80,7 @@ final class RunnerConfigTests: XCTestCase {
         let settings = json?["settings"] as? [String: Any]
         let isolationMode = settings?["isolationMode"] as? [String: Any]
         XCTAssertEqual(isolationMode?["type"] as? String, "none")
+        XCTAssertEqual(settings?["autoCheckForUpdates"] as? Bool, true)
         XCTAssertEqual(settings?["openFileLimit"] as? Int, 131072)
     }
 
@@ -125,6 +127,7 @@ final class RunnerConfigTests: XCTestCase {
             "settings": {
                 "startOnLogin": false,
                 "pauseOnBattery": false,
+                "autoCheckForUpdates": false,
                 "openFileLimit": 131072,
                 "isolationMode": {
                     "type": "none"
@@ -157,6 +160,7 @@ final class RunnerConfigTests: XCTestCase {
 
         // Global settings
         XCTAssertEqual(config.settings.isolationMode, .none)
+        XCTAssertEqual(config.settings.autoCheckForUpdates, false)
         XCTAssertEqual(config.settings.openFileLimit, 131072)
     }
 
@@ -190,6 +194,7 @@ final class RunnerConfigTests: XCTestCase {
         XCTAssertEqual(config.runners[0].busy, false)  // Default
         XCTAssertNil(config.runners[0].openFileLimit)  // Default
         XCTAssertEqual(config.settings.isolationMode, .none)  // Default
+        XCTAssertEqual(config.settings.autoCheckForUpdates, true)  // Default
         XCTAssertEqual(config.settings.openFileLimit, ResourceLimits.defaultOpenFileLimit)  // Default
     }
 
@@ -213,6 +218,7 @@ final class RunnerConfigTests: XCTestCase {
                 startOnLogin: true,
                 pauseOnBattery: false,
                 isolationMode: .dedicatedUser(username: "_macrunner"),
+                autoCheckForUpdates: false,
                 openFileLimit: 131072
             )
         )
@@ -239,6 +245,7 @@ final class RunnerConfigTests: XCTestCase {
         XCTAssertEqual(decodedConfig.settings.startOnLogin, originalConfig.settings.startOnLogin)
         XCTAssertEqual(decodedConfig.settings.pauseOnBattery, originalConfig.settings.pauseOnBattery)
         XCTAssertEqual(decodedConfig.settings.isolationMode, originalConfig.settings.isolationMode)
+        XCTAssertEqual(decodedConfig.settings.autoCheckForUpdates, originalConfig.settings.autoCheckForUpdates)
         XCTAssertEqual(decodedConfig.settings.openFileLimit, originalConfig.settings.openFileLimit)
     }
 }

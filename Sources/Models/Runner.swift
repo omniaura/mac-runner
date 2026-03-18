@@ -183,6 +183,7 @@ struct AppSettings: Codable, Sendable {
     var pauseOnBattery: Bool
     var quietHours: QuietHours?
     var isolationMode: IsolationMode
+    var autoCheckForUpdates: Bool
     var autoRestartEnabled: Bool
     var autoRestartMaxRetries: Int
     var openFileLimit: Int
@@ -192,6 +193,7 @@ struct AppSettings: Codable, Sendable {
         pauseOnBattery: false,
         quietHours: nil,
         isolationMode: .none,
+        autoCheckForUpdates: true,
         autoRestartEnabled: true,
         autoRestartMaxRetries: 5,
         openFileLimit: ResourceLimits.defaultOpenFileLimit
@@ -202,6 +204,7 @@ struct AppSettings: Codable, Sendable {
         pauseOnBattery: Bool = false,
         quietHours: QuietHours? = nil,
         isolationMode: IsolationMode = .none,
+        autoCheckForUpdates: Bool = true,
         autoRestartEnabled: Bool = true,
         autoRestartMaxRetries: Int = 5,
         openFileLimit: Int = ResourceLimits.defaultOpenFileLimit
@@ -210,6 +213,7 @@ struct AppSettings: Codable, Sendable {
         self.pauseOnBattery = pauseOnBattery
         self.quietHours = quietHours
         self.isolationMode = isolationMode
+        self.autoCheckForUpdates = autoCheckForUpdates
         self.autoRestartEnabled = autoRestartEnabled
         self.autoRestartMaxRetries = max(1, autoRestartMaxRetries)
         self.openFileLimit = ResourceLimits.normalizedOpenFileLimit(openFileLimit) ?? ResourceLimits.defaultOpenFileLimit
@@ -221,6 +225,7 @@ struct AppSettings: Codable, Sendable {
         pauseOnBattery = try container.decodeIfPresent(Bool.self, forKey: .pauseOnBattery) ?? false
         quietHours = try container.decodeIfPresent(QuietHours.self, forKey: .quietHours)
         isolationMode = try container.decodeIfPresent(IsolationMode.self, forKey: .isolationMode) ?? .none
+        autoCheckForUpdates = try container.decodeIfPresent(Bool.self, forKey: .autoCheckForUpdates) ?? true
         autoRestartEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoRestartEnabled) ?? true
         autoRestartMaxRetries = max(1, try container.decodeIfPresent(Int.self, forKey: .autoRestartMaxRetries) ?? 5)
         openFileLimit = ResourceLimits.normalizedOpenFileLimit(

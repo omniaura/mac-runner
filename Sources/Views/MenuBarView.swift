@@ -39,7 +39,7 @@ struct MenuBarView: View {
             // Footer
             footerButtons
         }
-        .frame(width: 300, height: 400)
+        .frame(width: 300, height: 430)
         .sheet(isPresented: $showAddRunner) {
             AddRunnerView()
                 .environmentObject(runnerManager)
@@ -140,22 +140,71 @@ struct MenuBarView: View {
     }
 
     private var footerButtons: some View {
-        HStack {
-            Button(action: {
-                NotificationCenter.default.post(name: .openSettings, object: nil)
-            }) {
-                Label("Settings", systemImage: "gear")
-            }
-            .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 10) {
+            if let update = runnerManager.availableUpdate {
+                Button(action: {
+                    runnerManager.openUpdate()
+                }) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .foregroundColor(.accentColor)
 
-            Spacer()
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Version \(update.latestVersion) available")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                            Text(update.detailText)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
 
-            Button(action: {
-                NSApplication.shared.terminate(nil)
-            }) {
-                Label("Quit", systemImage: "xmark.circle")
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background(Color.accentColor.opacity(0.1))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+
+            HStack {
+                Button(action: {
+                    NotificationCenter.default.post(name: .openSettings, object: nil)
+                }) {
+                    Label("Settings", systemImage: "gear")
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Button(action: {
+                    Task {
+                        await runnerManager.checkForUpdates(force: true)
+                    }
+                }) {
+                    if runnerManager.isCheckingForUpdates {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("Updates", systemImage: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Button(action: {
+                    NSApplication.shared.terminate(nil)
+                }) {
+                    Label("Quit", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.plain)
+            }
+
+            Text(runnerManager.updateStatusMessage)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding()
     }
@@ -342,6 +391,19 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
+                Toggle("Check for Updates Automatically", isOn: Binding(
+                    get: { runnerManager.currentSettings.autoCheckForUpdates },
+                    set: { newValue in
+                        var settings = runnerManager.currentSettings
+                        settings.autoCheckForUpdates = newValue
+                        runnerManager.updateSettings(settings)
+                    }
+                ))
+
+                Text("Checks the latest GitHub release on launch, then uses a 24-hour backoff with a 5-minute response cache for manual refreshes.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
                 Toggle("Auto-Restart on Crash", isOn: Binding(
                     get: { runnerManager.currentSettings.autoRestartEnabled },
                     set: { newValue in
@@ -442,6 +504,26 @@ struct SettingsView: View {
 
                 Text("Version \(CLIHandler.version)")
                     .foregroundColor(.secondary)
+
+                if let update = runnerManager.availableUpdate {
+                    Text("Update available: \(update.latestVersion)")
+                        .font(.caption)
+                        .foregroundColor(.accentColor)
+                } else {
+                    Text(runnerManager.updateStatusMessage)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                Button(action: {
+                    Task {
+                        await runnerManager.checkForUpdates(force: true)
+                    }
+                }) {
+                    Label("Check for Updates", systemImage: "arrow.clockwise")
+                }
+                .disabled(runnerManager.isCheckingForUpdates)
 
                 Text("GitHub Actions self-hosted runner manager for macOS")
                     .font(.caption)
