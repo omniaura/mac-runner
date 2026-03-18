@@ -1,3 +1,10 @@
+## [1.12.1](https://github.com/omniaura/mac-runner/compare/v1.12.0...v1.12.1) (2026-03-18)
+
+
+### Bug Fixes
+
+* resolve CLI version when invoked without full path ([#63](https://github.com/omniaura/mac-runner/issues/63)) ([d69a1da](https://github.com/omniaura/mac-runner/commit/d69a1da8535c70a96fa5d0b503c2680c0bd4ba9b))
+
 # [1.12.0](https://github.com/omniaura/mac-runner/compare/v1.11.1...v1.12.0) (2026-03-18)
 
 
