@@ -13,6 +13,7 @@ class RunnerManager: ObservableObject {
         static let defaultAutomaticChecks = "Checks GitHub releases on launch and once per day."
         static let alreadyChecking = "Update check already in progress."
         static let checking = "Checking for updates..."
+        static let alreadyInstalling = "Update install already in progress."
     }
 
     @Published var runners: [Runner] = []
@@ -20,6 +21,7 @@ class RunnerManager: ObservableObject {
     @Published var error: String?
     @Published private(set) var availableUpdate: AvailableUpdate?
     @Published private(set) var isCheckingForUpdates = false
+    @Published private(set) var isInstallingUpdate = false
     @Published private(set) var updateStatusMessage = UpdateStatusMessages.defaultAutomaticChecks
 
     private let configService = ConfigService()
@@ -28,6 +30,7 @@ class RunnerManager: ObservableObject {
     private let processManager = ProcessManager()
     private let pidManager = PIDFileManager()
     private let updateChecker = UpdateChecker()
+    private let updateInstaller = UpdateInstaller()
     #if canImport(Containerization)
     private var _containerService: Any?  // ContainerIsolationService, but untyped for availability
     #endif
@@ -55,6 +58,7 @@ class RunnerManager: ObservableObject {
     private let restartWindowSeconds: TimeInterval = 600
     private let restartBaseDelaySeconds = 5
     private let restartMaxDelaySeconds = 60
+    private var installedUpdateVersion: String?
 
     /// Initialize the RunnerManager and restore runtime state.
     ///
@@ -241,9 +245,16 @@ class RunnerManager: ObservableObject {
                     updateStatusMessage = "Already checked within the last 24 hours."
                 }
             case .upToDate:
+                installedUpdateVersion = nil
                 availableUpdate = nil
                 updateStatusMessage = "Mac Runner is up to date."
             case .updateAvailable(let update):
+                if installedUpdateVersion == update.latestVersion {
+                    availableUpdate = nil
+                    updateStatusMessage = "Updated to \(update.latestVersion). Quit and reopen Mac Runner to use it."
+                    return
+                }
+
                 availableUpdate = update
                 updateStatusMessage = "Version \(update.latestVersion) is available."
             }
@@ -258,13 +269,38 @@ class RunnerManager: ObservableObject {
 
     func openUpdate() {
         guard let availableUpdate else { return }
+        NSWorkspace.shared.open(availableUpdate.releaseURL)
+    }
 
-        if let upgradeCommand = availableUpdate.upgradeCommand {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(upgradeCommand, forType: .string)
+    func performAvailableUpdate() async {
+        guard let availableUpdate else { return }
+
+        switch availableUpdate.installSource {
+        case .homebrewFormula, .homebrewCask:
+            await installAvailableUpdate(availableUpdate)
+        case .directDownload:
+            openUpdate()
+        }
+    }
+
+    private func installAvailableUpdate(_ update: AvailableUpdate) async {
+        guard !isInstallingUpdate else {
+            updateStatusMessage = UpdateStatusMessages.alreadyInstalling
+            return
         }
 
-        NSWorkspace.shared.open(availableUpdate.releaseURL)
+        isInstallingUpdate = true
+        updateStatusMessage = "Installing \(update.latestVersion) via Homebrew..."
+        defer { isInstallingUpdate = false }
+
+        do {
+            try await updateInstaller.install(update)
+            installedUpdateVersion = update.latestVersion
+            availableUpdate = nil
+            updateStatusMessage = "Updated to \(update.latestVersion). Quit and reopen Mac Runner to use it."
+        } catch {
+            updateStatusMessage = "Update failed: \(error.localizedDescription)"
+        }
     }
 
     private func refreshUpdateStatusMessage() {
