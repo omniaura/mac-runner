@@ -61,9 +61,9 @@ struct AvailableUpdate: Sendable, Equatable {
     var actionTitle: String {
         switch installSource {
         case .homebrewFormula, .homebrewCask:
-            return "Upgrade via Homebrew"
+            return "Install Update"
         case .directDownload:
-            return "Open Release Page"
+            return "Download Update"
         }
     }
 
@@ -81,9 +81,9 @@ struct AvailableUpdate: Sendable, Equatable {
     var detailText: String {
         switch installSource {
         case .homebrewFormula:
-            return "Use brew upgrade mac-runner"
+            return "Runs brew upgrade mac-runner"
         case .homebrewCask:
-            return "Use brew upgrade --cask mac-runner"
+            return "Runs brew upgrade --cask mac-runner"
         case .directDownload:
             return "Download the latest DMG from GitHub Releases"
         }

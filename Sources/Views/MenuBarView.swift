@@ -143,14 +143,21 @@ struct MenuBarView: View {
         VStack(alignment: .leading, spacing: 10) {
             if let update = runnerManager.availableUpdate {
                 Button(action: {
-                    runnerManager.openUpdate()
+                    Task {
+                        await runnerManager.performAvailableUpdate()
+                    }
                 }) {
                     HStack(spacing: 10) {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .foregroundColor(.accentColor)
+                        if runnerManager.isInstallingUpdate {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .foregroundColor(.accentColor)
+                        }
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Version \(update.latestVersion) available")
+                            Text(update.actionTitle)
                                 .font(.caption)
                                 .fontWeight(.semibold)
                             Text(update.detailText)
@@ -165,6 +172,7 @@ struct MenuBarView: View {
                     .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
+                .disabled(runnerManager.isInstallingUpdate)
             }
 
             HStack {
@@ -190,6 +198,7 @@ struct MenuBarView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .disabled(runnerManager.isInstallingUpdate)
 
                 Spacer()
 
