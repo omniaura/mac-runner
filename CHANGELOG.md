@@ -1,3 +1,10 @@
+# [1.13.0](https://github.com/omniaura/mac-runner/compare/v1.12.1...v1.13.0) (2026-03-19)
+
+
+### Features
+
+* add Homebrew self-update flow ([#64](https://github.com/omniaura/mac-runner/issues/64)) ([27f750a](https://github.com/omniaura/mac-runner/commit/27f750a5eeca44dedbaea13cc8b32c06646a6e84))
+
 ## [1.12.1](https://github.com/omniaura/mac-runner/compare/v1.12.0...v1.12.1) (2026-03-18)
 
 
