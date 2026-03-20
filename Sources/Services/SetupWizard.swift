@@ -104,6 +104,10 @@ enum SetupWizard {
         let mainUser = ProcessInfo.processInfo.environment["SUDO_USER"] ?? NSUserName()
         if mainUser == "root" {
             print("Skipping sudoers entry (root already has full privileges).")
+        } else if !isolationService.userExists(mainUser) {
+            print("Error: '\(mainUser)' is not a valid local user account.")
+            print("Cannot create sudoers entry for an unknown user.")
+            return
         } else {
             print("Installing sudoers entry for '\(mainUser)'...")
             do {
@@ -143,7 +147,7 @@ enum SetupWizard {
         New runners added with 'mac-runner add' will run as '\(username)'.
         Existing runners are NOT migrated — remove and re-add them to use isolation.
 
-        To disable isolation: mac-runner setup --teardown
+        To disable isolation: sudo mac-runner setup --teardown
         """)
     }
 

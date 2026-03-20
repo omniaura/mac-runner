@@ -5,10 +5,18 @@ class ConfigService {
     private let configFile: URL
 
     init() {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!
+        let appSupport: URL
+        // When running under sudo, resolve the invoking user's Application Support
+        // directory instead of root's (/var/root/Library/Application Support).
+        if geteuid() == 0,
+           let sudoUser = ProcessInfo.processInfo.environment["SUDO_USER"] {
+            appSupport = URL(fileURLWithPath: "/Users/\(sudoUser)/Library/Application Support")
+        } else {
+            appSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first!
+        }
 
         configDirectory = appSupport.appendingPathComponent("MacRunner", isDirectory: true)
         configFile = configDirectory.appendingPathComponent("config.json")
