@@ -1,4 +1,3 @@
-import CHelpers
 import Foundation
 
 enum IsolationError: LocalizedError {
@@ -276,14 +275,12 @@ class UserIsolationService {
     }
 
     func authenticateAdministratorAccess() throws {
-        // Use C system() via CHelpers instead of Foundation Process.
-        // system() properly manages terminal foreground process groups,
-        // which is required for sudo's interactive password prompt via
-        // /dev/tty. Foundation's Process spawns via posix_spawn without
-        // setting the child as the terminal foreground group, so sudo
-        // can't read the password and fails with "Input/output error".
-        let status = run_system_command("sudo -v")
-        guard status == 0 else {
+        let process = Self.makeAdministratorAuthenticationProcess()
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
             throw IsolationError.authenticationFailed("sudo authentication was cancelled or failed")
         }
     }

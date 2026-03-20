@@ -146,8 +146,8 @@ enum CLIHandler {
           mac-runner start my-runner
           mac-runner stop my-runner
           mac-runner remove my-runner
-          mac-runner setup
-          mac-runner setup --teardown
+          sudo mac-runner setup
+          sudo mac-runner setup --teardown
         """)
     }
 
