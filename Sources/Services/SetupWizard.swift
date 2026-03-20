@@ -99,16 +99,20 @@ enum SetupWizard {
         }
 
         // Step 3: Install sudoers entry
-        print("Installing sudoers entry...")
-        do {
-            // When running via sudo, NSUserName() returns "root".
-            // SUDO_USER contains the actual invoking user.
-            let mainUser = ProcessInfo.processInfo.environment["SUDO_USER"] ?? NSUserName()
-            try isolationService.installSudoersEntry(mainUsername: mainUser, serviceUsername: username)
-            print("  Sudoers entry installed.")
-        } catch {
-            print("Error: \(error.localizedDescription)")
-            return
+        // When running via sudo, NSUserName() returns "root".
+        // SUDO_USER contains the actual invoking user.
+        let mainUser = ProcessInfo.processInfo.environment["SUDO_USER"] ?? NSUserName()
+        if mainUser == "root" {
+            print("Skipping sudoers entry (root already has full privileges).")
+        } else {
+            print("Installing sudoers entry for '\(mainUser)'...")
+            do {
+                try isolationService.installSudoersEntry(mainUsername: mainUser, serviceUsername: username)
+                print("  Sudoers entry installed.")
+            } catch {
+                print("Error: \(error.localizedDescription)")
+                return
+            }
         }
 
         // Step 4: Verify tool access
