@@ -318,4 +318,36 @@ final class MacRunnerTests: XCTestCase {
         XCTAssertEqual(payload.body, "omniaura/mac-runner - Nightly (failure)")
         XCTAssertEqual(payload.runURL, run.htmlURL)
     }
+
+    func testRunnerManagerCurrentWorkflowHelpersPreferRunNameAndURL() {
+        let runURL = URL(string: "https://github.com/omniaura/mac-runner/actions/runs/42")!
+        let job = WorkflowJobSummary(
+            id: 8,
+            name: "test",
+            status: "in_progress",
+            conclusion: nil,
+            runnerName: "runner-1",
+            run: WorkflowRunSummary(id: 42, name: "Nightly", htmlURL: runURL)
+        )
+
+        XCTAssertEqual(RunnerManager.currentWorkflowDisplayName(from: job), "Nightly")
+        XCTAssertEqual(RunnerManager.currentWorkflowRunURL(from: job), runURL)
+    }
+
+    func testRunnerManagerCurrentWorkflowHelpersFallBackToJobName() {
+        let job = WorkflowJobSummary(
+            id: 9,
+            name: "integration",
+            status: "in_progress",
+            conclusion: nil,
+            runnerName: "runner-1",
+            run: WorkflowRunSummary(
+                id: 43,
+                name: "",
+                htmlURL: URL(string: "https://github.com/omniaura/mac-runner/actions/runs/43")!
+            )
+        )
+
+        XCTAssertEqual(RunnerManager.currentWorkflowDisplayName(from: job), "integration")
+    }
 }
