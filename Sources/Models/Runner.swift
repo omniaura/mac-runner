@@ -183,6 +183,7 @@ struct AppSettings: Codable, Sendable {
     var pauseOnBattery: Bool
     var quietHours: QuietHours?
     var isolationMode: IsolationMode
+    var tools: ToolProvisioningSettings
     var autoCheckForUpdates: Bool
     var autoRestartEnabled: Bool
     var autoRestartMaxRetries: Int
@@ -193,6 +194,7 @@ struct AppSettings: Codable, Sendable {
         pauseOnBattery: false,
         quietHours: nil,
         isolationMode: .none,
+        tools: .default,
         autoCheckForUpdates: true,
         autoRestartEnabled: true,
         autoRestartMaxRetries: 5,
@@ -204,6 +206,7 @@ struct AppSettings: Codable, Sendable {
         pauseOnBattery: Bool = false,
         quietHours: QuietHours? = nil,
         isolationMode: IsolationMode = .none,
+        tools: ToolProvisioningSettings = .default,
         autoCheckForUpdates: Bool = true,
         autoRestartEnabled: Bool = true,
         autoRestartMaxRetries: Int = 5,
@@ -213,6 +216,7 @@ struct AppSettings: Codable, Sendable {
         self.pauseOnBattery = pauseOnBattery
         self.quietHours = quietHours
         self.isolationMode = isolationMode
+        self.tools = tools
         self.autoCheckForUpdates = autoCheckForUpdates
         self.autoRestartEnabled = autoRestartEnabled
         self.autoRestartMaxRetries = max(1, autoRestartMaxRetries)
@@ -225,12 +229,47 @@ struct AppSettings: Codable, Sendable {
         pauseOnBattery = try container.decodeIfPresent(Bool.self, forKey: .pauseOnBattery) ?? false
         quietHours = try container.decodeIfPresent(QuietHours.self, forKey: .quietHours)
         isolationMode = try container.decodeIfPresent(IsolationMode.self, forKey: .isolationMode) ?? .none
+        tools = try container.decodeIfPresent(ToolProvisioningSettings.self, forKey: .tools) ?? .default
         autoCheckForUpdates = try container.decodeIfPresent(Bool.self, forKey: .autoCheckForUpdates) ?? true
         autoRestartEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoRestartEnabled) ?? true
         autoRestartMaxRetries = max(1, try container.decodeIfPresent(Int.self, forKey: .autoRestartMaxRetries) ?? 5)
         openFileLimit = ResourceLimits.normalizedOpenFileLimit(
             try container.decodeIfPresent(Int.self, forKey: .openFileLimit)
         ) ?? ResourceLimits.defaultOpenFileLimit
+    }
+}
+
+struct ToolProvisioningSettings: Codable, Sendable, Equatable {
+    var extraPackages: [String]
+
+    static let `default` = ToolProvisioningSettings(extraPackages: [])
+
+    init(extraPackages: [String] = []) {
+        self.extraPackages = Self.normalize(extraPackages)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        extraPackages = Self.normalize(
+            try container.decodeIfPresent([String].self, forKey: .extraPackages) ?? []
+        )
+    }
+
+    private static func normalize(_ packages: [String]) -> [String] {
+        let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789@+._-")
+
+        return Array(
+            Set(
+                packages.map {
+                    $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                        .lowercased()
+                }
+                .filter {
+                    !$0.isEmpty && $0.unicodeScalars.allSatisfy { allowedCharacters.contains($0) }
+                }
+            )
+        )
+        .sorted()
     }
 }
 

@@ -27,6 +27,7 @@ class RunnerManager: ObservableObject {
     private let configService = ConfigService()
     private let ghService = GHCLIService.shared
     private let isolationService = UserIsolationService.shared
+    private let toolProvisioningService = ToolProvisioningService()
     private let processManager = ProcessManager()
     private let pidManager = PIDFileManager()
     private let updateChecker = UpdateChecker()
@@ -394,15 +395,6 @@ class RunnerManager: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        // Validate repo access via gh CLI
-        guard try await ghService.validateRepo(repo) else {
-            throw RunnerError.invalidRepo
-        }
-
-        // Get registration token from GitHub via gh CLI
-        let registrationToken = try await ghService.getRegistrationToken(for: repo)
-
-        // Create runner with optional isolation mode override and GUI access setting
         let runner = Runner(
             name: name,
             repo: repo,
@@ -414,8 +406,23 @@ class RunnerManager: ObservableObject {
             openFileLimit: openFileLimit
         )
 
-        // Use per-runner isolation mode if specified, otherwise use global setting
         let effectiveIsolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
+
+        try await toolProvisioningService.ensureGitHubCLI(isolation: effectiveIsolation)
+
+        // Validate repo access via gh CLI
+        guard try await ghService.validateRepo(repo) else {
+            throw RunnerError.invalidRepo
+        }
+
+        try await toolProvisioningService.provisionTools(
+            for: repo,
+            settings: currentSettings.tools,
+            isolation: effectiveIsolation
+        )
+
+        // Get registration token from GitHub via gh CLI
+        let registrationToken = try await ghService.getRegistrationToken(for: repo)
 
         // Download, configure, and install runner
         try await RunnerInstaller.shared.setupRunner(

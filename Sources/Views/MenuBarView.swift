@@ -465,6 +465,32 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Extra CI Tools")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+
+                    TextField("jq, pnpm, ...", text: Binding(
+                        get: { runnerManager.currentSettings.tools.extraPackages.joined(separator: ", ") },
+                        set: { newValue in
+                            var settings = runnerManager.currentSettings
+                            settings.tools = ToolProvisioningSettings(
+                                extraPackages: newValue
+                                    .components(separatedBy: ",")
+                                    .map {
+                                        $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    }
+                            )
+                            runnerManager.updateSettings(settings)
+                        }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+
+                    Text("New runners always provision gh, detect common language toolchains from repo metadata, and install any extra Homebrew packages listed here.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
                 Spacer()
             }
             .padding()
