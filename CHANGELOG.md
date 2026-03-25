@@ -1,3 +1,15 @@
+# [1.14.0](https://github.com/omniaura/mac-runner/compare/v1.13.1...v1.14.0) (2026-03-25)
+
+
+### Bug Fixes
+
+* return normalized tool package list ([5f133a3](https://github.com/omniaura/mac-runner/commit/5f133a31955e52af0473cbf368d3f295ccaa4ca1)), closes [#66](https://github.com/omniaura/mac-runner/issues/66)
+
+
+### Features
+
+* auto-provision runner toolchains ([83007c5](https://github.com/omniaura/mac-runner/commit/83007c58a6423216af699c5a7fcf8262d4e8a262))
+
 ## [1.13.1](https://github.com/omniaura/mac-runner/compare/v1.13.0...v1.13.1) (2026-03-25)
 
 
