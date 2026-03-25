@@ -29,6 +29,7 @@ class RunnerManager: ObservableObject {
     private let ghService = GHCLIService.shared
     private let isolationService = UserIsolationService.shared
     private let toolProvisioningService = ToolProvisioningService()
+    private let jobNotificationService = JobNotificationService.shared
     private let processManager = ProcessManager()
     private let pidManager = PIDFileManager()
     private let updateChecker = UpdateChecker()
@@ -51,6 +52,7 @@ class RunnerManager: ObservableObject {
     private(set) var currentSettings: AppSettings = .default
     private var statusPollingTask: Task<Void, Never>?
     private var runnersToAutoRestart: Set<UUID> = []
+    private var activeWorkflowJobs: [UUID: WorkflowJobSummary] = [:]
     /// Names reserved by in-flight addRunner calls to prevent duplicate naming race conditions.
     private var pendingRunnerNames: Set<String> = []
     private var manualStopRequests: Set<UUID> = []
@@ -84,6 +86,12 @@ class RunnerManager: ObservableObject {
         for runner in runners where runner.status == .running {
             if !processManager.isProcessAlive(for: runner.id) {
                 runnersToAutoRestart.insert(runner.id)
+            }
+        }
+
+        for runner in runners where runner.busy {
+            Task { [weak self] in
+                await self?.restoreActiveJobState(for: runner)
             }
         }
 
@@ -664,6 +672,7 @@ class RunnerManager: ObservableObject {
         // Use per-runner isolation mode if specified, otherwise use global setting
         let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
         manualStopRequests.insert(id)
+        activeWorkflowJobs.removeValue(forKey: id)
 
         // Check if this is a container-based runner
         do {
@@ -798,8 +807,15 @@ class RunnerManager: ObservableObject {
                 if let index = runners.firstIndex(where: { $0.id == runner.id }),
                    let remoteRunner = remoteRunners.first(where: { $0.name == runner.name }) {
                     if runners[index].busy != remoteRunner.busy {
+                        let becameBusy = remoteRunner.busy
                         runners[index].busy = remoteRunner.busy
                         changed = true
+
+                        if becameBusy {
+                            await handleJobStarted(for: runners[index])
+                        } else {
+                            await handleJobCompleted(for: runners[index])
+                        }
                     }
                 }
             }
@@ -1122,6 +1138,42 @@ class RunnerManager: ObservableObject {
         }
 
         gitHubAuthIssue = nil
+    }
+
+    private func restoreActiveJobState(for runner: Runner) async {
+        guard activeWorkflowJobs[runner.id] == nil else { return }
+        activeWorkflowJobs[runner.id] = try? await ghService.currentJob(for: runner.repo, runnerName: runner.name)
+    }
+
+    private func handleJobStarted(for runner: Runner) async {
+        guard activeWorkflowJobs[runner.id] == nil else { return }
+        guard let job = try? await ghService.currentJob(for: runner.repo, runnerName: runner.name) else {
+            return
+        }
+
+        activeWorkflowJobs[runner.id] = job
+        if currentSettings.notificationsEnabled {
+            await jobNotificationService.notify(event: .started, runner: runner, job: job)
+        }
+    }
+
+    private func handleJobCompleted(for runner: Runner) async {
+        guard let activeJob = activeWorkflowJobs[runner.id] else { return }
+        defer { activeWorkflowJobs.removeValue(forKey: runner.id) }
+
+        let completedJob = try? await ghService.completedJob(
+            for: runner.repo,
+            runnerName: runner.name,
+            runID: activeJob.run.id
+        )
+
+        if currentSettings.notificationsEnabled {
+            await jobNotificationService.notify(
+                event: .completed,
+                runner: runner,
+                job: completedJob ?? activeJob
+            )
+        }
     }
 
     private func cancelScheduledRestarts(clearHistory: Bool) {

@@ -453,6 +453,19 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
+                Toggle("Job Notifications", isOn: Binding(
+                    get: { runnerManager.currentSettings.notificationsEnabled },
+                    set: { newValue in
+                        var settings = runnerManager.currentSettings
+                        settings.notificationsEnabled = newValue
+                        runnerManager.updateSettings(settings)
+                    }
+                ))
+
+                Text("Show native macOS notifications when a runner starts a job and when that job completes. Clicking a notification opens the GitHub Actions run.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Default Open Files Limit")
                         .font(.subheadline)

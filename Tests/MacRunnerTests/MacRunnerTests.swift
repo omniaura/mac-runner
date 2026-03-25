@@ -218,6 +218,7 @@ final class MacRunnerTests: XCTestCase {
         let settings = try JSONDecoder().decode(AppSettings.self, from: data)
 
         XCTAssertEqual(settings.tools, .default)
+        XCTAssertTrue(settings.notificationsEnabled)
     }
 
     func testToolProvisioningSettingsNormalizesExtraPackages() {
@@ -270,5 +271,51 @@ final class MacRunnerTests: XCTestCase {
         XCTAssertFalse(state.isAuthenticated)
         XCTAssertEqual(state.statusMessage, "gh CLI not found or not authenticated")
         XCTAssertEqual(state.recoveryMessage, "GitHub authentication expired or is invalid. Run: gh auth login")
+    }
+
+    func testJobNotificationPayloadFactoryBuildsStartedPayload() {
+        let runner = Runner(name: "runner-1", repo: "omniaura/mac-runner")
+        let run = WorkflowRunSummary(
+            id: 42,
+            name: "CI",
+            htmlURL: URL(string: "https://github.com/omniaura/mac-runner/actions/runs/42")!
+        )
+        let job = WorkflowJobSummary(
+            id: 7,
+            name: "build",
+            status: "in_progress",
+            conclusion: nil,
+            runnerName: "runner-1",
+            run: run
+        )
+
+        let payload = JobNotificationPayloadFactory.make(event: .started, runner: runner, job: job)
+
+        XCTAssertEqual(payload.title, "Job started on runner-1")
+        XCTAssertEqual(payload.body, "omniaura/mac-runner - CI")
+        XCTAssertEqual(payload.runURL, run.htmlURL)
+    }
+
+    func testJobNotificationPayloadFactoryBuildsFailurePayload() {
+        let runner = Runner(name: "runner-1", repo: "omniaura/mac-runner")
+        let run = WorkflowRunSummary(
+            id: 42,
+            name: "Nightly",
+            htmlURL: URL(string: "https://github.com/omniaura/mac-runner/actions/runs/42")!
+        )
+        let job = WorkflowJobSummary(
+            id: 8,
+            name: "test",
+            status: "completed",
+            conclusion: "failure",
+            runnerName: "runner-1",
+            run: run
+        )
+
+        let payload = JobNotificationPayloadFactory.make(event: .completed, runner: runner, job: job)
+
+        XCTAssertEqual(payload.title, "Job failed on runner-1")
+        XCTAssertEqual(payload.body, "omniaura/mac-runner - Nightly (failure)")
+        XCTAssertEqual(payload.runURL, run.htmlURL)
     }
 }

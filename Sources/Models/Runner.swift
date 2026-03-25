@@ -184,6 +184,7 @@ struct AppSettings: Codable, Sendable {
     var quietHours: QuietHours?
     var isolationMode: IsolationMode
     var tools: ToolProvisioningSettings
+    var notificationsEnabled: Bool
     var autoCheckForUpdates: Bool
     var autoRestartEnabled: Bool
     var autoRestartMaxRetries: Int
@@ -195,6 +196,7 @@ struct AppSettings: Codable, Sendable {
         quietHours: nil,
         isolationMode: .none,
         tools: .default,
+        notificationsEnabled: true,
         autoCheckForUpdates: true,
         autoRestartEnabled: true,
         autoRestartMaxRetries: 5,
@@ -207,6 +209,9 @@ struct AppSettings: Codable, Sendable {
         quietHours: QuietHours? = nil,
         isolationMode: IsolationMode = .none,
         tools: ToolProvisioningSettings = .default,
+        notificationsEnabled: Bool = true,
+        tools: ToolProvisioningSettings = .default,
+        notificationsEnabled: Bool = true,
         autoCheckForUpdates: Bool = true,
         autoRestartEnabled: Bool = true,
         autoRestartMaxRetries: Int = 5,
@@ -216,6 +221,8 @@ struct AppSettings: Codable, Sendable {
         self.pauseOnBattery = pauseOnBattery
         self.quietHours = quietHours
         self.isolationMode = isolationMode
+        self.tools = tools
+        self.notificationsEnabled = notificationsEnabled
         self.tools = tools
         self.autoCheckForUpdates = autoCheckForUpdates
         self.autoRestartEnabled = autoRestartEnabled
@@ -230,6 +237,9 @@ struct AppSettings: Codable, Sendable {
         quietHours = try container.decodeIfPresent(QuietHours.self, forKey: .quietHours)
         isolationMode = try container.decodeIfPresent(IsolationMode.self, forKey: .isolationMode) ?? .none
         tools = try container.decodeIfPresent(ToolProvisioningSettings.self, forKey: .tools) ?? .default
+        notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
+        tools = try container.decodeIfPresent(ToolProvisioningSettings.self, forKey: .tools) ?? .default
+        notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         autoCheckForUpdates = try container.decodeIfPresent(Bool.self, forKey: .autoCheckForUpdates) ?? true
         autoRestartEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoRestartEnabled) ?? true
         autoRestartMaxRetries = max(1, try container.decodeIfPresent(Int.self, forKey: .autoRestartMaxRetries) ?? 5)
