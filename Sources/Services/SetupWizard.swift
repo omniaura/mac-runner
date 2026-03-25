@@ -24,6 +24,15 @@ enum SetupWizard {
 
     @MainActor
     static func runSetup() async {
+        // Require root — all setup operations need administrator privileges.
+        // Running with sudo ensures clean terminal I/O (no mid-flow password
+        // prompts) and a cached credential for all child sudo -n calls.
+        guard geteuid() == 0 else {
+            print("Error: setup requires administrator privileges.")
+            print("Run: sudo mac-runner setup")
+            return
+        }
+
         let configService = ConfigService()
         let config: RunnerConfig
         do {
@@ -36,7 +45,7 @@ enum SetupWizard {
         // Check if already enabled
         if case .dedicatedUser(let username) = config.settings.isolationMode {
             print("Isolation is already enabled (user: \(username)).")
-            print("Run 'mac-runner setup --teardown' to disable.")
+            print("Run 'sudo mac-runner setup --teardown' to disable.")
             return
         }
 
@@ -56,22 +65,12 @@ enum SetupWizard {
           2. Sets up a home directory at /Users/\(username)
           3. Installs a sudoers entry for passwordless runner management
           4. Updates your mac-runner config to use isolated mode
-
-        This requires administrator (sudo) privileges.
         """)
 
         print("Proceed with setup? [y/N] ", terminator: "")
         guard let response = readLine()?.trimmingCharacters(in: .whitespaces).lowercased(),
               response == "y" || response == "yes" else {
             print("Setup cancelled.")
-            return
-        }
-
-        print("Requesting administrator access...")
-        do {
-            try isolationService.authenticateAdministratorAccess()
-        } catch {
-            print("Error: \(error.localizedDescription)")
             return
         }
 
@@ -100,14 +99,24 @@ enum SetupWizard {
         }
 
         // Step 3: Install sudoers entry
-        print("Installing sudoers entry...")
-        do {
-            let mainUser = NSUserName()
-            try isolationService.installSudoersEntry(mainUsername: mainUser, serviceUsername: username)
-            print("  Sudoers entry installed.")
-        } catch {
-            print("Error: \(error.localizedDescription)")
+        // When running via sudo, NSUserName() returns "root".
+        // SUDO_USER contains the actual invoking user.
+        let mainUser = ProcessInfo.processInfo.environment["SUDO_USER"] ?? NSUserName()
+        if mainUser == "root" {
+            print("Skipping sudoers entry (root already has full privileges).")
+        } else if !isolationService.userExists(mainUser) {
+            print("Error: '\(mainUser)' is not a valid local user account.")
+            print("Cannot create sudoers entry for an unknown user.")
             return
+        } else {
+            print("Installing sudoers entry for '\(mainUser)'...")
+            do {
+                try isolationService.installSudoersEntry(mainUsername: mainUser, serviceUsername: username)
+                print("  Sudoers entry installed.")
+            } catch {
+                print("Error: \(error.localizedDescription)")
+                return
+            }
         }
 
         // Step 4: Verify tool access
@@ -138,7 +147,7 @@ enum SetupWizard {
         New runners added with 'mac-runner add' will run as '\(username)'.
         Existing runners are NOT migrated — remove and re-add them to use isolation.
 
-        To disable isolation: mac-runner setup --teardown
+        To disable isolation: sudo mac-runner setup --teardown
         """)
     }
 
@@ -146,6 +155,12 @@ enum SetupWizard {
 
     @MainActor
     static func runTeardown() async {
+        guard geteuid() == 0 else {
+            print("Error: teardown requires administrator privileges.")
+            print("Run: sudo mac-runner setup --teardown")
+            return
+        }
+
         let configService = ConfigService()
         let config: RunnerConfig
         do {
@@ -196,14 +211,6 @@ enum SetupWizard {
         guard let response = readLine()?.trimmingCharacters(in: .whitespaces).lowercased(),
               response == "y" || response == "yes" else {
             print("Teardown cancelled.")
-            return
-        }
-
-        print("Requesting administrator access...")
-        do {
-            try isolationService.authenticateAdministratorAccess()
-        } catch {
-            print("Error: \(error.localizedDescription)")
             return
         }
 

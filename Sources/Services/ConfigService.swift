@@ -3,12 +3,20 @@ import Foundation
 class ConfigService {
     private let configDirectory: URL
     private let configFile: URL
+    private let invokingUser: String?
 
     init() {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!
+        let environment = ProcessInfo.processInfo.environment
+        invokingUser = Self.invokingUser(effectiveUserID: geteuid(), environment: environment)
+
+        let appSupport = Self.applicationSupportDirectory(
+            effectiveUserID: geteuid(),
+            environment: environment,
+            fallback: FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first!
+        )
 
         configDirectory = appSupport.appendingPathComponent("MacRunner", isDirectory: true)
         configFile = configDirectory.appendingPathComponent("config.json")
@@ -18,6 +26,7 @@ class ConfigService {
             at: configDirectory,
             withIntermediateDirectories: true
         )
+        try? restoreOwnershipIfNeeded()
     }
 
     func loadConfig() throws -> RunnerConfig {
@@ -34,6 +43,43 @@ class ConfigService {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(config)
         try data.write(to: configFile, options: .atomic)
+        try restoreOwnershipIfNeeded()
+    }
+
+    static func invokingUser(effectiveUserID: uid_t, environment: [String: String]) -> String? {
+        guard effectiveUserID == 0 else { return nil }
+        return environment["SUDO_USER"]
+    }
+
+    static func applicationSupportDirectory(
+        effectiveUserID: uid_t,
+        environment: [String: String],
+        fallback: URL
+    ) -> URL {
+        guard let sudoUser = invokingUser(effectiveUserID: effectiveUserID, environment: environment) else {
+            return fallback
+        }
+
+        return URL(fileURLWithPath: "/Users/\(sudoUser)/Library/Application Support")
+    }
+
+    private func restoreOwnershipIfNeeded() throws {
+        guard let invokingUser else { return }
+
+        let chown = Process()
+        chown.executableURL = URL(fileURLWithPath: "/usr/sbin/chown")
+        chown.arguments = ["-R", "\(invokingUser):staff", configDirectory.path]
+
+        let pipe = Pipe()
+        chown.standardOutput = pipe
+        chown.standardError = pipe
+        try chown.run()
+        chown.waitUntilExit()
+
+        guard chown.terminationStatus == 0 else {
+            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: output])
+        }
     }
 }
 
