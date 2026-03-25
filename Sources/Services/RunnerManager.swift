@@ -23,6 +23,7 @@ class RunnerManager: ObservableObject {
     @Published private(set) var isCheckingForUpdates = false
     @Published private(set) var isInstallingUpdate = false
     @Published private(set) var updateStatusMessage = UpdateStatusMessages.defaultAutomaticChecks
+    @Published private(set) var gitHubAuthIssue: String?
 
     private let configService = ConfigService()
     private let ghService = GHCLIService.shared
@@ -76,6 +77,7 @@ class RunnerManager: ObservableObject {
             : nil
         refreshUpdateStatusMessage()
         initializeContainerService()
+        Task { await refreshGitHubAuthStatus() }
 
         // Before reconciling, capture runners that were running but whose
         // processes are no longer alive — these need auto-restart after launch.
@@ -268,6 +270,11 @@ class RunnerManager: ObservableObject {
         }
     }
 
+    func refreshGitHubAuthStatus() async {
+        let authState = await ghService.validateAuth()
+        gitHubAuthIssue = authState.isAuthenticated ? nil : authState.recoveryMessage
+    }
+
     func openUpdate() {
         guard let availableUpdate else { return }
         NSWorkspace.shared.open(availableUpdate.releaseURL)
@@ -410,6 +417,8 @@ class RunnerManager: ObservableObject {
 
         try await toolProvisioningService.ensureGitHubCLI(isolation: effectiveIsolation)
 
+        try await validateGitHubAuth(for: runner, operation: "add runner")
+
         // Validate repo access via gh CLI
         guard try await ghService.validateRepo(repo) else {
             throw RunnerError.invalidRepo
@@ -510,9 +519,11 @@ class RunnerManager: ObservableObject {
 
         // Get runner directory
         let runnerDir = try RunnerDirectory.path(for: id, isolation: isolation)
+        let needsRunnerSetup = !FileManager.default.fileExists(atPath: "\(runnerDir)/run.sh")
 
         // Ensure runner binary is downloaded and configured
-        if !FileManager.default.fileExists(atPath: "\(runnerDir)/run.sh") {
+        if needsRunnerSetup {
+            try await validateGitHubAuth(for: runner, operation: "start runner")
             let registrationToken = try await ghService.getRegistrationToken(for: runner.repo)
             try await RunnerInstaller.shared.setupRunner(
                 repo: runner.repo,
@@ -529,6 +540,9 @@ class RunnerManager: ObservableObject {
 
         // Container isolation requires special handling
         if case .container = isolation {
+            if !needsRunnerSetup {
+                try await validateGitHubAuth(for: runner, operation: "start runner")
+            }
             // Container-based isolation (macOS 26+)
             #if canImport(Containerization)
             if #available(macOS 26.0, *) {
@@ -1093,6 +1107,21 @@ class RunnerManager: ObservableObject {
         let attempts = restartAttemptHistory[id, default: []].filter { $0 >= cutoff }
         restartAttemptHistory[id] = attempts
         return attempts
+    }
+
+    private func validateGitHubAuth(for runner: Runner, operation: String) async throws {
+        let authState = await ghService.validateAuth()
+        guard authState.isAuthenticated else {
+            gitHubAuthIssue = authState.recoveryMessage
+            error = authState.recoveryMessage
+            logRunnerEvent(
+                for: runner,
+                message: "GitHub auth check failed during \(operation): \(authState.recoveryMessage)"
+            )
+            throw GHError.authFailed(authState.recoveryMessage)
+        }
+
+        gitHubAuthIssue = nil
     }
 
     private func cancelScheduledRestarts(clearHistory: Bool) {

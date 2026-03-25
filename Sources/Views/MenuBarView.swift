@@ -141,6 +141,13 @@ struct MenuBarView: View {
 
     private var footerButtons: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let gitHubAuthIssue = runnerManager.gitHubAuthIssue {
+                Text(gitHubAuthIssue)
+                    .font(.caption2)
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             if let update = runnerManager.availableUpdate {
                 Button(action: {
                     Task {
@@ -579,6 +586,7 @@ struct SettingsView: View {
     private func checkAuth() async {
         isAuthenticated = await GHCLIService.shared.checkAuth()
         authStatusText = await GHCLIService.shared.authStatus()
+        await runnerManager.refreshGitHubAuthStatus()
     }
 
     private func login() async {
