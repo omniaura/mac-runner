@@ -19,8 +19,22 @@ final class GHCLIService: Sendable {
 
     private let ghPath: String
 
-    init(ghPath: String = "/opt/homebrew/bin/gh") {
-        self.ghPath = ghPath
+    init(
+        ghPath: String? = nil,
+        fileExists: @escaping @Sendable (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
+    ) {
+        self.ghPath = ghPath ?? Self.detectExecutablePath(fileExists: fileExists)
+    }
+
+    static func detectExecutablePath(
+        fileExists: @escaping @Sendable (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
+    ) -> String {
+        let candidates = [
+            "/opt/homebrew/bin/gh",
+            "/usr/local/bin/gh"
+        ]
+
+        return candidates.first(where: fileExists) ?? "/opt/homebrew/bin/gh"
     }
 
     // MARK: - Private Helpers
@@ -142,6 +156,22 @@ final class GHCLIService: Sendable {
     func validateRepo(_ repo: String) async throws -> Bool {
         let result = try await runGH(["api", "repos/\(repo)"])
         return result.exitCode == 0
+    }
+
+    func repositoryRootEntries(for repo: String) async throws -> Set<String> {
+        let result = try await runGH([
+            "api", "repos/\(repo)/contents",
+            "--jq", ".[].name"
+        ])
+        guard result.exitCode == 0 else {
+            throw GHError.apiFailed("Failed to inspect repository contents: \(result.stderr)")
+        }
+
+        let entries = result.stdout
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Set(entries)
     }
 
     // MARK: - Runners

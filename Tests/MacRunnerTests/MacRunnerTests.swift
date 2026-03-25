@@ -186,4 +186,54 @@ final class MacRunnerTests: XCTestCase {
             ConfigService.invokingUser(effectiveUserID: 501, environment: ["SUDO_USER": "peyton"])
         )
     }
+
+    func testToolProvisioningPlanIncludesAlwaysOnDetectedAndConfiguredPackages() {
+        let plan = ToolProvisioningService.plan(
+            rootEntries: ["package.json", "requirements.txt", "Cargo.toml"],
+            settings: ToolProvisioningSettings(extraPackages: ["jq", "gh", "jq"])
+        )
+
+        XCTAssertEqual(plan.packages, ["gh", "jq", "node", "python", "rust"])
+    }
+
+    func testToolProvisioningPlanHandlesCaseInsensitiveRepositoryMetadata() {
+        let plan = ToolProvisioningService.plan(
+            rootEntries: ["Gemfile", "GO.MOD", "PyProject.toml"],
+            settings: .default
+        )
+
+        XCTAssertEqual(plan.packages, ["gh", "go", "python", "ruby"])
+    }
+
+    func testAppSettingsDefaultsToolProvisioningConfigWhenMissing() throws {
+        let data = Data("""
+        {
+          "startOnLogin": true,
+          "isolationMode": {
+            "type": "none"
+          }
+        }
+        """.utf8)
+
+        let settings = try JSONDecoder().decode(AppSettings.self, from: data)
+
+        XCTAssertEqual(settings.tools, .default)
+    }
+
+    func testToolProvisioningSettingsNormalizesExtraPackages() {
+        let settings = ToolProvisioningSettings(extraPackages: [" jq ", "PNPM", "jq", "bad;rm", ""])
+
+        XCTAssertEqual(settings.extraPackages, ["jq", "pnpm"])
+    }
+
+    func testGHCLIServiceDetectExecutablePathPrefersAvailableStandardLocations() {
+        XCTAssertEqual(
+            GHCLIService.detectExecutablePath(fileExists: { $0 == "/usr/local/bin/gh" }),
+            "/usr/local/bin/gh"
+        )
+        XCTAssertEqual(
+            GHCLIService.detectExecutablePath(fileExists: { _ in false }),
+            "/opt/homebrew/bin/gh"
+        )
+    }
 }
