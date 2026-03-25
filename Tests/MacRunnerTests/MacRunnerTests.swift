@@ -152,4 +152,38 @@ final class MacRunnerTests: XCTestCase {
         XCTAssertNotNil(process.standardOutput)
         XCTAssertNotNil(process.standardError)
     }
+
+    func testConfigServiceUsesInvokingUsersApplicationSupportWhenRunningUnderSudo() {
+        let fallback = URL(fileURLWithPath: "/var/root/Library/Application Support")
+
+        let appSupport = ConfigService.applicationSupportDirectory(
+            effectiveUserID: 0,
+            environment: ["SUDO_USER": "peyton"],
+            fallback: fallback
+        )
+
+        XCTAssertEqual(appSupport.path, "/Users/peyton/Library/Application Support")
+    }
+
+    func testConfigServiceFallsBackToCurrentUsersApplicationSupportWithoutSudoUser() {
+        let fallback = URL(fileURLWithPath: "/Users/current/Library/Application Support")
+
+        let appSupport = ConfigService.applicationSupportDirectory(
+            effectiveUserID: 0,
+            environment: [:],
+            fallback: fallback
+        )
+
+        XCTAssertEqual(appSupport, fallback)
+    }
+
+    func testConfigServiceDetectsInvokingUserOnlyForRootProcesses() {
+        XCTAssertEqual(
+            ConfigService.invokingUser(effectiveUserID: 0, environment: ["SUDO_USER": "peyton"]),
+            "peyton"
+        )
+        XCTAssertNil(
+            ConfigService.invokingUser(effectiveUserID: 501, environment: ["SUDO_USER": "peyton"])
+        )
+    }
 }
