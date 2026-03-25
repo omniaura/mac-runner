@@ -258,7 +258,7 @@ struct ToolProvisioningSettings: Codable, Sendable, Equatable {
     private static func normalize(_ packages: [String]) -> [String] {
         let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789@+._-")
 
-        Array(
+        return Array(
             Set(
                 packages.map {
                     $0.trimmingCharacters(in: .whitespacesAndNewlines)
