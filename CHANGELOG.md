@@ -1,3 +1,15 @@
+## [1.13.1](https://github.com/omniaura/mac-runner/compare/v1.13.0...v1.13.1) (2026-03-25)
+
+
+### Bug Fixes
+
+* address CodeRabbit review feedback ([abb16dc](https://github.com/omniaura/mac-runner/commit/abb16dceeac1047d971d49cd4a75cd45414d0673))
+* require sudo for setup instead of broken interactive pre-auth ([5e1b931](https://github.com/omniaura/mac-runner/commit/5e1b931b0f0c1157164d5c2b5463b2fc2df2dd74))
+* restore config ownership after sudo setup ([ed97694](https://github.com/omniaura/mac-runner/commit/ed97694317b3156c3787a98567dbd3995e536ae0))
+* skip sudoers entry when mainUser is root ([509355b](https://github.com/omniaura/mac-runner/commit/509355b52f01c61bcc79721bcced38a59e66b332))
+* use C system() for sudo auth to fix terminal I/O error ([dd99689](https://github.com/omniaura/mac-runner/commit/dd99689d6e471ecc76c22242dc08377b3f4234da))
+* use C system() via CHelpers module for sudo terminal I/O ([44d7fb4](https://github.com/omniaura/mac-runner/commit/44d7fb4de687deb8ec778c0ac6a73e2b00cc852f))
+
 # [1.13.0](https://github.com/omniaura/mac-runner/compare/v1.12.1...v1.13.0) (2026-03-19)
 
 
