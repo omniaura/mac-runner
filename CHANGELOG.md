@@ -1,3 +1,10 @@
+## [1.14.1](https://github.com/omniaura/mac-runner/compare/v1.14.0...v1.14.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* surface expired GitHub auth on runner start ([1f33fe3](https://github.com/omniaura/mac-runner/commit/1f33fe353f71587d43ea27d717b1d92edf647f82))
+
 # [1.14.0](https://github.com/omniaura/mac-runner/compare/v1.13.1...v1.14.0) (2026-03-25)
 
 
