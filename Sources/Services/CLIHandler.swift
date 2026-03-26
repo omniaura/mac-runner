@@ -247,9 +247,9 @@ enum CLIHandler {
         }
 
         // Check auth first
-        let authenticated = await GHCLIService.shared.checkAuth()
-        guard authenticated else {
-            print("Error: not authenticated with GitHub. Run: gh auth login")
+        let authState = await GHCLIService.shared.validateAuth()
+        guard authState.isAuthenticated else {
+            print("Error: \(authState.recoveryMessage)")
             return
         }
 

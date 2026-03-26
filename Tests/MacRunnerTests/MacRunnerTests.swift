@@ -236,4 +236,39 @@ final class MacRunnerTests: XCTestCase {
             "/opt/homebrew/bin/gh"
         )
     }
+
+    func testGitHubAuthStateUsesDetailedAuthenticatedStatusOutput() {
+        let state = GitHubAuthState.fromProcessResult(
+            exitCode: 0,
+            stdout: "",
+            stderr: "Logged in to github.com as peyton"
+        )
+
+        XCTAssertTrue(state.isAuthenticated)
+        XCTAssertEqual(state.statusMessage, "Logged in to github.com as peyton")
+        XCTAssertEqual(state.recoveryMessage, "")
+    }
+
+    func testGitHubAuthStateBuildsActionableRecoveryMessage() {
+        let state = GitHubAuthState.fromProcessResult(
+            exitCode: 1,
+            stdout: "",
+            stderr: "Token in keychain has expired"
+        )
+
+        XCTAssertFalse(state.isAuthenticated)
+        XCTAssertEqual(state.statusMessage, "Token in keychain has expired")
+        XCTAssertEqual(
+            state.recoveryMessage,
+            "GitHub authentication expired or is invalid. Run: gh auth login\nToken in keychain has expired"
+        )
+    }
+
+    func testGitHubAuthStateFallsBackToGenericRecoveryMessageWithoutDetails() {
+        let state = GitHubAuthState.fromProcessResult(exitCode: 1, stdout: "", stderr: "")
+
+        XCTAssertFalse(state.isAuthenticated)
+        XCTAssertEqual(state.statusMessage, "gh CLI not found or not authenticated")
+        XCTAssertEqual(state.recoveryMessage, "GitHub authentication expired or is invalid. Run: gh auth login")
+    }
 }

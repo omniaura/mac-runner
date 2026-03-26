@@ -14,6 +14,36 @@ struct ProcessResult: Sendable {
     let stderr: String
 }
 
+struct GitHubAuthState: Sendable, Equatable {
+    let isAuthenticated: Bool
+    let statusMessage: String
+    let recoveryMessage: String
+
+    static func fromProcessResult(exitCode: Int32, stdout: String, stderr: String) -> GitHubAuthState {
+        let detail = stderr.isEmpty ? stdout : stderr
+        let trimmedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if exitCode == 0 {
+            return GitHubAuthState(
+                isAuthenticated: true,
+                statusMessage: trimmedDetail.isEmpty ? "Authenticated with GitHub CLI." : trimmedDetail,
+                recoveryMessage: ""
+            )
+        }
+
+        let recoveryPrefix = "GitHub authentication expired or is invalid. Run: gh auth login"
+        let recoveryMessage = trimmedDetail.isEmpty
+            ? recoveryPrefix
+            : "\(recoveryPrefix)\n\(trimmedDetail)"
+
+        return GitHubAuthState(
+            isAuthenticated: false,
+            statusMessage: trimmedDetail.isEmpty ? "gh CLI not found or not authenticated" : trimmedDetail,
+            recoveryMessage: recoveryMessage
+        )
+    }
+}
+
 final class GHCLIService: Sendable {
     static let shared = GHCLIService()
 
@@ -73,11 +103,24 @@ final class GHCLIService: Sendable {
 
     // MARK: - Auth
 
-    func checkAuth() async -> Bool {
+    func validateAuth() async -> GitHubAuthState {
         guard let result = try? await runGH(["auth", "status"]) else {
-            return false
+            return GitHubAuthState(
+                isAuthenticated: false,
+                statusMessage: "gh CLI not found or not authenticated",
+                recoveryMessage: "GitHub authentication expired or is invalid. Run: gh auth login"
+            )
         }
-        return result.exitCode == 0
+
+        return GitHubAuthState.fromProcessResult(
+            exitCode: result.exitCode,
+            stdout: result.stdout,
+            stderr: result.stderr
+        )
+    }
+
+    func checkAuth() async -> Bool {
+        await validateAuth().isAuthenticated
     }
 
     func openLogin() async throws {
@@ -88,13 +131,8 @@ final class GHCLIService: Sendable {
     }
 
     func authStatus() async -> String {
-        guard let result = try? await runGH(["auth", "status"]) else {
-            return "gh CLI not found or not authenticated"
-        }
-        // gh auth status prints to stderr
-        return result.exitCode == 0
-            ? (result.stderr.isEmpty ? result.stdout : result.stderr)
-            : "Not authenticated. Run: gh auth login"
+        let state = await validateAuth()
+        return state.isAuthenticated ? state.statusMessage : state.recoveryMessage
     }
 
     // MARK: - Repos
