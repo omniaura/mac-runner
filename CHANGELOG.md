@@ -1,3 +1,10 @@
+# [1.16.0](https://github.com/omniaura/mac-runner/compare/v1.15.0...v1.16.0) (2026-05-03)
+
+
+### Features
+
+* open active job runs from the menubar ([#69](https://github.com/omniaura/mac-runner/issues/69)) ([d5e29cb](https://github.com/omniaura/mac-runner/commit/d5e29cb1a493ce955963cdc4cf89b9d3b9fbcef1))
+
 # [1.15.0](https://github.com/omniaura/mac-runner/compare/v1.14.1...v1.15.0) (2026-05-03)
 
 
