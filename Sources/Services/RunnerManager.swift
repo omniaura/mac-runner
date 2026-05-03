@@ -331,11 +331,11 @@ class RunnerManager: ObservableObject {
         NSWorkspace.shared.open(runURL)
     }
 
-    static func currentWorkflowRunURL(from job: WorkflowJobSummary?) -> URL? {
+    nonisolated static func currentWorkflowRunURL(from job: WorkflowJobSummary?) -> URL? {
         job?.run.htmlURL
     }
 
-    static func currentWorkflowDisplayName(from job: WorkflowJobSummary?) -> String? {
+    nonisolated static func currentWorkflowDisplayName(from job: WorkflowJobSummary?) -> String? {
         guard let job else { return nil }
         return job.run.name.isEmpty ? job.name : job.run.name
     }
