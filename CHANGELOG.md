@@ -1,3 +1,10 @@
+# [1.15.0](https://github.com/omniaura/mac-runner/compare/v1.14.1...v1.15.0) (2026-05-03)
+
+
+### Features
+
+* notify on runner job activity ([#68](https://github.com/omniaura/mac-runner/issues/68)) ([08919ae](https://github.com/omniaura/mac-runner/commit/08919ae02f9a9f32785f21058669f602c1712933))
+
 ## [1.14.1](https://github.com/omniaura/mac-runner/compare/v1.14.0...v1.14.1) (2026-03-26)
 
 
