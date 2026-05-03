@@ -73,7 +73,7 @@ class ContainerIsolationService {
         let kernel = Kernel(path: kernelPath, platform: .linuxArm)
 
         // Create network configuration (vmnet shared mode)
-        let network = try ContainerManager.VmnetNetwork()
+        let network = try VmnetNetwork()
 
         // Initialize container manager with kernel and network
         // vminit will be fetched automatically from registry on first use

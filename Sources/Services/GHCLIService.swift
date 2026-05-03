@@ -212,6 +212,34 @@ final class GHCLIService: Sendable {
         return Set(entries)
     }
 
+    func currentJob(for repo: String, runnerName: String) async throws -> WorkflowJobSummary? {
+        let runs = try await listWorkflowRuns(for: repo, status: "in_progress")
+
+        for run in runs {
+            let jobs = try await listJobs(for: repo, runID: run.id, run: run)
+            if let job = jobs.first(where: {
+                $0.runnerName == runnerName && $0.status != "completed"
+            }) {
+                return job
+            }
+        }
+
+        return nil
+    }
+
+    func completedJob(for repo: String, runnerName: String, runID: Int) async throws -> WorkflowJobSummary? {
+        let runs = try await listWorkflowRuns(for: repo, status: "completed")
+
+        guard let run = runs.first(where: { $0.id == runID }) else {
+            return nil
+        }
+
+        let jobs = try await listJobs(for: repo, runID: run.id, run: run)
+        return jobs.first(where: {
+            $0.runnerName == runnerName && $0.status == "completed"
+        })
+    }
+
     // MARK: - Runners
 
     func getRegistrationToken(for repo: String) async throws -> String {
@@ -270,6 +298,73 @@ final class GHCLIService: Sendable {
         ])
         guard result.exitCode == 0 else {
             throw GHError.apiFailed("Failed to delete runner: \(result.stderr)")
+        }
+    }
+
+    private func listWorkflowRuns(for repo: String, status: String) async throws -> [WorkflowRunSummary] {
+        let result = try await runGH([
+            "api", "repos/\(repo)/actions/runs?status=\(status)&per_page=10",
+            "--jq", ".workflow_runs"
+        ])
+        guard result.exitCode == 0 else {
+            throw GHError.apiFailed("Failed to list workflow runs: \(result.stderr)")
+        }
+
+        struct APIWorkflowRun: Decodable {
+            let id: Int
+            let name: String?
+            let htmlURL: URL
+
+            enum CodingKeys: String, CodingKey {
+                case id
+                case name
+                case htmlURL = "html_url"
+            }
+        }
+
+        let data = Data(result.stdout.utf8)
+        let runs = try JSONDecoder().decode([APIWorkflowRun].self, from: data)
+        return runs.map {
+            WorkflowRunSummary(id: $0.id, name: $0.name ?? "GitHub Actions", htmlURL: $0.htmlURL)
+        }
+    }
+
+    private func listJobs(for repo: String, runID: Int, run: WorkflowRunSummary) async throws -> [WorkflowJobSummary] {
+        let result = try await runGH([
+            "api", "repos/\(repo)/actions/runs/\(runID)/jobs",
+            "--jq", ".jobs"
+        ])
+        guard result.exitCode == 0 else {
+            throw GHError.apiFailed("Failed to list workflow jobs: \(result.stderr)")
+        }
+
+        struct APIJob: Decodable {
+            let id: Int
+            let name: String
+            let status: String
+            let conclusion: String?
+            let runnerName: String?
+
+            enum CodingKeys: String, CodingKey {
+                case id
+                case name
+                case status
+                case conclusion
+                case runnerName = "runner_name"
+            }
+        }
+
+        let data = Data(result.stdout.utf8)
+        let jobs = try JSONDecoder().decode([APIJob].self, from: data)
+        return jobs.map {
+            WorkflowJobSummary(
+                id: $0.id,
+                name: $0.name,
+                status: $0.status,
+                conclusion: $0.conclusion,
+                runnerName: $0.runnerName,
+                run: run
+            )
         }
     }
 }
