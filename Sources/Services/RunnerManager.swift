@@ -319,6 +319,27 @@ class RunnerManager: ObservableObject {
         }
     }
 
+    func currentWorkflowJob(for runnerID: UUID) -> WorkflowJobSummary? {
+        activeWorkflowJobs[runnerID]
+    }
+
+    func openCurrentWorkflowRun(for runnerID: UUID) {
+        guard let runURL = Self.currentWorkflowRunURL(from: activeWorkflowJobs[runnerID]) else {
+            return
+        }
+
+        NSWorkspace.shared.open(runURL)
+    }
+
+    nonisolated static func currentWorkflowRunURL(from job: WorkflowJobSummary?) -> URL? {
+        job?.run.htmlURL
+    }
+
+    nonisolated static func currentWorkflowDisplayName(from job: WorkflowJobSummary?) -> String? {
+        guard let job else { return nil }
+        return job.run.name.isEmpty ? job.name : job.run.name
+    }
+
     private func refreshUpdateStatusMessage() {
         if let availableUpdate {
             updateStatusMessage = "Version \(availableUpdate.latestVersion) is available."

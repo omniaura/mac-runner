@@ -268,6 +268,25 @@ struct RunnerRow: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
+                if runner.status == .running,
+                   runner.busy,
+                   let currentJob = runnerManager.currentWorkflowJob(for: runner.id),
+                   let workflowName = RunnerManager.currentWorkflowDisplayName(from: currentJob) {
+                    Button(action: {
+                        runnerManager.openCurrentWorkflowRun(for: runner.id)
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "link")
+                            Text("View \(workflowName)")
+                                .lineLimit(1)
+                        }
+                        .font(.caption2)
+                        .foregroundColor(.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open current GitHub Actions run")
+                }
+
                 HStack(spacing: 4) {
                     // Isolation mode indicator
                     if let mode = runner.isolationMode {
@@ -347,6 +366,11 @@ struct RunnerRow: View {
             if runner.status == .running {
                 Button("Stop") {
                     Task { try? await runnerManager.stopRunner(runner.id) }
+                }
+                if runner.busy, runnerManager.currentWorkflowJob(for: runner.id) != nil {
+                    Button("Open Current Job") {
+                        runnerManager.openCurrentWorkflowRun(for: runner.id)
+                    }
                 }
             } else {
                 Button("Start") {
