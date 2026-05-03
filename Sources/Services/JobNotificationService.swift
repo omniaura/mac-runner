@@ -53,47 +53,41 @@ enum JobNotificationPayloadFactory {
     }
 }
 
+@MainActor
 final class JobNotificationService: NSObject, @preconcurrency UNUserNotificationCenterDelegate {
     static let shared = JobNotificationService()
 
     private let notificationCenter = UNUserNotificationCenter.current()
     private var authorizationRequested = false
 
-    @MainActor
     func configure() {
         notificationCenter.delegate = self
         requestAuthorizationIfNeededInternal()
     }
 
     func notify(event: JobNotificationEvent, runner: Runner, job: WorkflowJobSummary) async {
-        await MainActor.run {
-            requestAuthorizationIfNeeded()
-        }
+        requestAuthorizationIfNeeded()
 
         let payload = JobNotificationPayloadFactory.make(event: event, runner: runner, job: job)
-        await MainActor.run {
-            let content = UNMutableNotificationContent()
-            content.title = payload.title
-            content.body = payload.body
-            content.sound = .default
-            content.userInfo = ["runURL": payload.runURL.absoluteString]
+        let content = UNMutableNotificationContent()
+        content.title = payload.title
+        content.body = payload.body
+        content.sound = .default
+        content.userInfo = ["runURL": payload.runURL.absoluteString]
 
-            let request = UNNotificationRequest(
-                identifier: "job-\(runner.id.uuidString)-\(job.id)-\(eventIdentifier(for: event))",
-                content: content,
-                trigger: nil
-            )
+        let request = UNNotificationRequest(
+            identifier: "job-\(runner.id.uuidString)-\(job.id)-\(eventIdentifier(for: event))",
+            content: content,
+            trigger: nil
+        )
 
-            notificationCenter.add(request, withCompletionHandler: nil)
-        }
+        notificationCenter.add(request, withCompletionHandler: nil)
     }
 
-    @MainActor
     private func requestAuthorizationIfNeeded() {
         requestAuthorizationIfNeededInternal()
     }
 
-    @MainActor
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
@@ -109,7 +103,6 @@ final class JobNotificationService: NSObject, @preconcurrency UNUserNotification
         NSWorkspace.shared.open(url)
     }
 
-    @MainActor
     private func requestAuthorizationIfNeededInternal() {
         guard !authorizationRequested else { return }
         authorizationRequested = true

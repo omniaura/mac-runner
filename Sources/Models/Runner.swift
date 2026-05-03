@@ -210,8 +210,6 @@ struct AppSettings: Codable, Sendable {
         isolationMode: IsolationMode = .none,
         tools: ToolProvisioningSettings = .default,
         notificationsEnabled: Bool = true,
-        tools: ToolProvisioningSettings = .default,
-        notificationsEnabled: Bool = true,
         autoCheckForUpdates: Bool = true,
         autoRestartEnabled: Bool = true,
         autoRestartMaxRetries: Int = 5,
@@ -223,7 +221,6 @@ struct AppSettings: Codable, Sendable {
         self.isolationMode = isolationMode
         self.tools = tools
         self.notificationsEnabled = notificationsEnabled
-        self.tools = tools
         self.autoCheckForUpdates = autoCheckForUpdates
         self.autoRestartEnabled = autoRestartEnabled
         self.autoRestartMaxRetries = max(1, autoRestartMaxRetries)
