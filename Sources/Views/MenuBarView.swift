@@ -69,24 +69,27 @@ struct MenuBarView: View {
         .frame(maxHeight: .infinity)
     }
 
-    /// Runners grouped by repo ("owner/repo"), sorted alphabetically by repo then by runner name.
-    private var groupedRunners: [(repo: String, runners: [Runner])] {
-        let grouped = Dictionary(grouping: runnerManager.runners) { $0.repo }
+    /// Runners grouped by target (scope + identifier), sorted alphabetically by identifier
+    /// then by runner name. Grouping by target — not by `repo` string — keeps a repo-level
+    /// runner for "acme/api" separate from an org-level runner for "acme" if both exist.
+    private var groupedRunners: [(target: RunnerTarget, runners: [Runner])] {
+        let grouped = Dictionary(grouping: runnerManager.runners) { $0.target }
         return grouped
-            .map { (repo: $0.key, runners: $0.value.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) }
-            .sorted { $0.repo.localizedCaseInsensitiveCompare($1.repo) == .orderedAscending }
+            .map { (target: $0.key, runners: $0.value.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) }
+            .sorted { $0.target.identifier.localizedCaseInsensitiveCompare($1.target.identifier) == .orderedAscending }
     }
 
     private var runnerList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(groupedRunners, id: \.repo) { group in
-                    // Section header
+                ForEach(groupedRunners, id: \.target) { group in
+                    // Section header — org-level groups use a building icon to distinguish
+                    // them from repo-level groups at a glance.
                     HStack(spacing: 4) {
-                        Image(systemName: "folder")
+                        Image(systemName: group.target.scope == .org ? "building.2" : "folder")
                             .font(.caption2)
                             .foregroundColor(.secondary)
-                        Text(group.repo)
+                        Text(group.target.displayName)
                             .font(.caption)
                             .fontWeight(.semibold)
                             .foregroundColor(.secondary)
@@ -264,7 +267,7 @@ struct RunnerRow: View {
                     }
                 }
 
-                Text(runner.repo)
+                Text(runner.target.displayName)
                     .font(.caption)
                     .foregroundColor(.secondary)
 

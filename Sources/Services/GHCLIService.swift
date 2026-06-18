@@ -196,6 +196,23 @@ final class GHCLIService: Sendable {
         return result.exitCode == 0
     }
 
+    /// Verify that the authenticated `gh` user can access the given runner target.
+    ///
+    /// For repository targets this falls through to `validateRepo`. For
+    /// organization targets we probe `orgs/{org}` — this requires the user
+    /// to be a member of the org, but does NOT verify admin access. The
+    /// registration-token POST below will fail loudly if the user lacks
+    /// the org admin permission needed to register runners.
+    func validateTarget(_ target: RunnerTarget) async throws -> Bool {
+        switch target.scope {
+        case .repo:
+            return try await validateRepo(target.identifier)
+        case .org:
+            let result = try await runGH(["api", "orgs/\(target.identifier)"])
+            return result.exitCode == 0
+        }
+    }
+
     func repositoryRootEntries(for repo: String) async throws -> Set<String> {
         let result = try await runGH([
             "api", "repos/\(repo)/contents",
@@ -243,9 +260,13 @@ final class GHCLIService: Sendable {
     // MARK: - Runners
 
     func getRegistrationToken(for repo: String) async throws -> String {
+        try await getRegistrationToken(for: RunnerTarget(scope: .repo, identifier: repo))
+    }
+
+    func getRegistrationToken(for target: RunnerTarget) async throws -> String {
         let result = try await runGH([
             "api", "-X", "POST",
-            "repos/\(repo)/actions/runners/registration-token",
+            "\(target.apiPath)/actions/runners/registration-token",
             "--jq", ".token"
         ])
         guard result.exitCode == 0, !result.stdout.isEmpty else {
@@ -255,8 +276,12 @@ final class GHCLIService: Sendable {
     }
 
     func listRemoteRunners(for repo: String) async throws -> [RemoteRunner] {
+        try await listRemoteRunners(for: RunnerTarget(scope: .repo, identifier: repo))
+    }
+
+    func listRemoteRunners(for target: RunnerTarget) async throws -> [RemoteRunner] {
         let result = try await runGH([
-            "api", "repos/\(repo)/actions/runners",
+            "api", "\(target.apiPath)/actions/runners",
             "--jq", ".runners"
         ])
         guard result.exitCode == 0 else {
@@ -292,9 +317,16 @@ final class GHCLIService: Sendable {
     }
 
     func deleteRunner(repo: String, githubRunnerId: Int) async throws {
+        try await deleteRunner(
+            target: RunnerTarget(scope: .repo, identifier: repo),
+            githubRunnerId: githubRunnerId
+        )
+    }
+
+    func deleteRunner(target: RunnerTarget, githubRunnerId: Int) async throws {
         let result = try await runGH([
             "api", "-X", "DELETE",
-            "repos/\(repo)/actions/runners/\(githubRunnerId)"
+            "\(target.apiPath)/actions/runners/\(githubRunnerId)"
         ])
         guard result.exitCode == 0 else {
             throw GHError.apiFailed("Failed to delete runner: \(result.stderr)")

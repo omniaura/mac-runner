@@ -414,7 +414,8 @@ class RunnerManager: ObservableObject {
     ///
     /// - Parameters:
     ///   - name: Unique name for the runner
-    ///   - repo: GitHub repository in "owner/repo" format
+    ///   - repo: Target identifier — "owner/repo" for `.repo` scope, "org" for `.org` scope
+    ///   - scope: Repository (default) or organization-level runner
     ///   - labels: Labels to assign to the runner for workflow targeting
     ///   - isolationMode: Optional isolation mode override (nil uses global setting)
     ///   - enableGUI: Whether to enable GUI access for this runner (default: false, headless)
@@ -423,6 +424,7 @@ class RunnerManager: ObservableObject {
     func addRunner(
         name: String,
         repo: String,
+        scope: RunnerScope = .repo,
         labels: [String],
         isolationMode: IsolationMode? = nil,
         enableGUI: Bool = false,
@@ -434,6 +436,7 @@ class RunnerManager: ObservableObject {
         let runner = Runner(
             name: name,
             repo: repo,
+            scope: scope,
             labels: labels,
             enabled: true,
             status: .stopped,
@@ -443,28 +446,34 @@ class RunnerManager: ObservableObject {
         )
 
         let effectiveIsolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
+        let target = runner.target
 
         try await toolProvisioningService.ensureGitHubCLI(isolation: effectiveIsolation)
 
         try await validateGitHubAuth(for: runner, operation: "add runner")
 
-        // Validate repo access via gh CLI
-        guard try await ghService.validateRepo(repo) else {
+        // Validate target access via gh CLI
+        guard try await ghService.validateTarget(target) else {
             throw RunnerError.invalidRepo
         }
 
-        try await toolProvisioningService.provisionTools(
-            for: repo,
-            settings: currentSettings.tools,
-            isolation: effectiveIsolation
-        )
+        // Tool provisioning currently inspects repository contents to detect ecosystems
+        // (Node, Python, etc.). Org-level runners have no single repo to inspect, so we
+        // skip the per-repo discovery step and rely on the global extraPackages list.
+        if scope == .repo {
+            try await toolProvisioningService.provisionTools(
+                for: repo,
+                settings: currentSettings.tools,
+                isolation: effectiveIsolation
+            )
+        }
 
         // Get registration token from GitHub via gh CLI
-        let registrationToken = try await ghService.getRegistrationToken(for: repo)
+        let registrationToken = try await ghService.getRegistrationToken(for: target)
 
         // Download, configure, and install runner
         try await RunnerInstaller.shared.setupRunner(
-            repo: repo,
+            target: target,
             registrationToken: registrationToken,
             name: name,
             labels: labels,
@@ -474,7 +483,7 @@ class RunnerManager: ObservableObject {
 
         // Look up the GitHub-assigned runner ID so we can delete it later
         var registeredRunner = runner
-        if let remoteRunners = try? await ghService.listRemoteRunners(for: repo),
+        if let remoteRunners = try? await ghService.listRemoteRunners(for: target),
            let match = remoteRunners.first(where: { $0.name == name }) {
             registeredRunner.githubRunnerId = match.id
         }
@@ -503,7 +512,7 @@ class RunnerManager: ObservableObject {
         // Remove from GitHub via gh CLI
         if let runner = runners.first(where: { $0.id == id }) {
             if let ghId = runner.githubRunnerId {
-                try? await ghService.deleteRunner(repo: runner.repo, githubRunnerId: ghId)
+                try? await ghService.deleteRunner(target: runner.target, githubRunnerId: ghId)
             }
         }
 
@@ -553,9 +562,9 @@ class RunnerManager: ObservableObject {
         // Ensure runner binary is downloaded and configured
         if needsRunnerSetup {
             try await validateGitHubAuth(for: runner, operation: "start runner")
-            let registrationToken = try await ghService.getRegistrationToken(for: runner.repo)
+            let registrationToken = try await ghService.getRegistrationToken(for: runner.target)
             try await RunnerInstaller.shared.setupRunner(
-                repo: runner.repo,
+                target: runner.target,
                 registrationToken: registrationToken,
                 name: runner.name,
                 labels: runner.labels,
@@ -588,9 +597,11 @@ class RunnerManager: ObservableObject {
                 }
 
                 // Get registration token for container configuration
-                let registrationToken = try await ghService.getRegistrationToken(for: runner.repo)
+                let registrationToken = try await ghService.getRegistrationToken(for: runner.target)
 
-                // Create container configuration
+                // Create container configuration. `repositoryURL` is the value passed to
+                // `config.sh --url` inside the container, so it must point at the org or
+                // repo depending on the runner's scope.
                 let containerConfig = ContainerRunnerConfiguration(
                     containerImage: nil,  // Use default GitHub Actions runner image
                     cpuCount: 2,
@@ -598,7 +609,7 @@ class RunnerManager: ObservableObject {
                     diskSizeInBytes: 4 * 1024 * 1024 * 1024,  // 4 GiB
                     enableNestedVirtualization: false,
                     workspaceURL: URL(fileURLWithPath: runnerDir),
-                    repositoryURL: runner.repo,
+                    repositoryURL: runner.target.registrationURL,
                     registrationToken: registrationToken,
                     openFileLimit: runner.effectiveOpenFileLimit(global: currentSettings.openFileLimit)
                 )
@@ -809,16 +820,18 @@ class RunnerManager: ObservableObject {
     /// Groups runners by repository to minimize API calls, then updates the isBusy flag
     /// for each running runner based on whether it's currently executing a workflow.
     private func updateRunnerStatuses() async {
-        // Group runners by repo to minimize API calls
-        let runnersByRepo = Dictionary(grouping: runners) { $0.repo }
+        // Group runners by target (scope + identifier) to minimize API calls. We can't
+        // group purely by `repo` string: an org-level runner and a repo-level runner can
+        // share an identifier prefix, and the GitHub API endpoints differ by scope.
+        let runnersByTarget = Dictionary(grouping: runners) { $0.target }
 
-        for (repo, runnersInRepo) in runnersByRepo {
+        for (target, runnersInTarget) in runnersByTarget {
             // Only check runners that are currently running
-            let runningRunners = runnersInRepo.filter { $0.status == .running }
+            let runningRunners = runnersInTarget.filter { $0.status == .running }
             guard !runningRunners.isEmpty else { continue }
 
             // Fetch remote runner status from GitHub
-            guard let remoteRunners = try? await ghService.listRemoteRunners(for: repo) else {
+            guard let remoteRunners = try? await ghService.listRemoteRunners(for: target) else {
                 continue
             }
 
@@ -905,10 +918,11 @@ class RunnerManager: ObservableObject {
         pendingRunnerNames.insert(newName)
         defer { pendingRunnerNames.remove(newName) }
 
-        // Create duplicate with same settings, preserving isolation mode, GUI access, and resource limits
+        // Create duplicate with same settings, preserving scope, isolation mode, GUI access, and resource limits
         try await addRunner(
             name: newName,
             repo: originalRunner.repo,
+            scope: originalRunner.scope,
             labels: originalRunner.labels,
             isolationMode: originalRunner.isolationMode,
             enableGUI: originalRunner.enableGUI,
@@ -938,6 +952,7 @@ class RunnerManager: ObservableObject {
     func addRunners(
         baseName: String,
         repo: String,
+        scope: RunnerScope = .repo,
         labels: [String],
         count: Int,
         isolationMode: IsolationMode? = nil,
@@ -952,6 +967,7 @@ class RunnerManager: ObservableObject {
             try await addRunner(
                 name: baseName,
                 repo: repo,
+                scope: scope,
                 labels: labels,
                 isolationMode: isolationMode,
                 enableGUI: enableGUI,
@@ -984,6 +1000,7 @@ class RunnerManager: ObservableObject {
                 try await addRunner(
                     name: name,
                     repo: repo,
+                    scope: scope,
                     labels: labels,
                     isolationMode: isolationMode,
                     enableGUI: enableGUI,
@@ -1163,11 +1180,16 @@ class RunnerManager: ObservableObject {
 
     private func restoreActiveJobState(for runner: Runner) async {
         guard activeWorkflowJobs[runner.id] == nil else { return }
+        // Workflow runs are scoped to a specific repository in the GitHub API.
+        // Org-level runners would require scanning every repo in the org, which
+        // we don't do here — leave the active job indicator empty.
+        guard runner.scope == .repo else { return }
         activeWorkflowJobs[runner.id] = try? await ghService.currentJob(for: runner.repo, runnerName: runner.name)
     }
 
     private func handleJobStarted(for runner: Runner) async {
         guard activeWorkflowJobs[runner.id] == nil else { return }
+        guard runner.scope == .repo else { return }
         guard let job = try? await ghService.currentJob(for: runner.repo, runnerName: runner.name) else {
             return
         }
@@ -1182,11 +1204,16 @@ class RunnerManager: ObservableObject {
         guard let activeJob = activeWorkflowJobs[runner.id] else { return }
         defer { activeWorkflowJobs.removeValue(forKey: runner.id) }
 
-        let completedJob = try? await ghService.completedJob(
-            for: runner.repo,
-            runnerName: runner.name,
-            runID: activeJob.run.id
-        )
+        let completedJob: WorkflowJobSummary?
+        if runner.scope == .repo {
+            completedJob = try? await ghService.completedJob(
+                for: runner.repo,
+                runnerName: runner.name,
+                runID: activeJob.run.id
+            )
+        } else {
+            completedJob = nil
+        }
 
         if currentSettings.notificationsEnabled {
             await jobNotificationService.notify(
