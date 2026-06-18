@@ -40,7 +40,10 @@ class RunnerInstaller {
         print("Runner installed successfully to: \(directory)")
     }
 
-    /// Configure runner with a registration token (caller obtains it via GHCLIService)
+    /// Configure runner with a registration token (caller obtains it via GHCLIService).
+    ///
+    /// Legacy `repo`-based overload preserved for callers that haven't been
+    /// updated to pass an explicit `RunnerTarget`.
     func configureRunner(
         at directory: String,
         repo: String,
@@ -49,10 +52,28 @@ class RunnerInstaller {
         labels: [String],
         isolation: IsolationMode = .none
     ) async throws {
+        try await configureRunner(
+            at: directory,
+            target: RunnerTarget(scope: .repo, identifier: repo),
+            registrationToken: registrationToken,
+            name: name,
+            labels: labels,
+            isolation: isolation
+        )
+    }
+
+    func configureRunner(
+        at directory: String,
+        target: RunnerTarget,
+        registrationToken: String,
+        name: String,
+        labels: [String],
+        isolation: IsolationMode = .none
+    ) async throws {
         // Build config command
         var args = [
             "./config.sh",
-            "--url", "https://github.com/\(repo)",
+            "--url", target.registrationURL,
             "--token", registrationToken,
             "--name", name,
             "--unattended",
@@ -97,10 +118,31 @@ class RunnerInstaller {
         print("Runner configured successfully")
     }
 
-    /// One-click setup: Download, configure, and register runner
+    /// One-click setup: Download, configure, and register runner.
+    ///
+    /// Legacy repo-only overload — defaults the runner target to repository scope.
     @discardableResult
     func setupRunner(
         repo: String,
+        registrationToken: String,
+        name: String,
+        labels: [String],
+        runnerId: UUID,
+        isolation: IsolationMode = .none
+    ) async throws -> String {
+        try await setupRunner(
+            target: RunnerTarget(scope: .repo, identifier: repo),
+            registrationToken: registrationToken,
+            name: name,
+            labels: labels,
+            runnerId: runnerId,
+            isolation: isolation
+        )
+    }
+
+    @discardableResult
+    func setupRunner(
+        target: RunnerTarget,
         registrationToken: String,
         name: String,
         labels: [String],
@@ -120,7 +162,7 @@ class RunnerInstaller {
         // Configure with GitHub
         try await configureRunner(
             at: directory,
-            repo: repo,
+            target: target,
             registrationToken: registrationToken,
             name: name,
             labels: labels,

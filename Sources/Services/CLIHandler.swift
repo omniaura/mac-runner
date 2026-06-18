@@ -118,7 +118,7 @@ enum CLIHandler {
         COMMANDS:
           auth              Show GitHub authentication status
           list              List configured runners
-          add <repo>        Add a new runner
+          add <target>      Add a new runner (repo by default; pass --org for org-level)
           remove <name>     Remove a runner
           start <name>      Start a runner
           stop <name>       Stop a runner
@@ -128,6 +128,8 @@ enum CLIHandler {
           version           Show version
 
         ADD OPTIONS:
+          --org                Register an organization-level runner (target is the org login)
+          --repo               Register a repository-level runner (default)
           --name <name>        Runner name (default: auto-generated)
           --labels <l1,l2>     Comma-separated labels (default: macos)
           --isolation <mode>   Isolation mode: none|user|container (default: global)
@@ -139,6 +141,7 @@ enum CLIHandler {
         EXAMPLES:
           mac-runner auth
           mac-runner add owner/repo --name my-runner --labels macos,arm64
+          mac-runner add my-org --org --labels macos,arm64
           mac-runner add owner/repo --isolation container
           mac-runner add owner/repo --isolation user
           mac-runner add owner/repo --enable-gui
@@ -176,28 +179,35 @@ enum CLIHandler {
             return "\(effective.icon) \(effective.displayName)\(isInherited ? " (global)" : "")"
         }
 
+        // Display the scope alongside the identifier so org-level runners are
+        // visually distinguishable from repo-level runners with similar names.
+        let targets = runners.map { runner -> String in
+            runner.scope == .org ? "\(runner.repo) (org)" : runner.repo
+        }
+
         // Table header
         let nameW = max(runners.map(\.name.count).max() ?? 4, 4)
-        let repoW = max(runners.map(\.repo.count).max() ?? 4, 4)
+        let repoW = max(targets.map(\.count).max() ?? 4, 6)
         let isoW = max(isolationTexts.map(\.count).max() ?? 9, 9)
 
-        let header = "  \("NAME".padding(toLength: nameW, withPad: " ", startingAt: 0))  \("REPO".padding(toLength: repoW, withPad: " ", startingAt: 0))  STATUS      \("ISOLATION".padding(toLength: isoW, withPad: " ", startingAt: 0))  GUI       LABELS"
+        let header = "  \("NAME".padding(toLength: nameW, withPad: " ", startingAt: 0))  \("TARGET".padding(toLength: repoW, withPad: " ", startingAt: 0))  STATUS      \("ISOLATION".padding(toLength: isoW, withPad: " ", startingAt: 0))  GUI       LABELS"
         print(header)
 
-        for (runner, isolationText) in zip(runners, isolationTexts) {
+        for ((runner, isolationText), target) in zip(zip(runners, isolationTexts), targets) {
             let status = "\(runner.status.icon) \(runner.status.rawValue)"
             let labels = runner.labels.joined(separator: ",")
             let guiStatus = runner.enableGUI ? "enabled " : "headless"
-            let line = "  \(runner.name.padding(toLength: nameW, withPad: " ", startingAt: 0))  \(runner.repo.padding(toLength: repoW, withPad: " ", startingAt: 0))  \(status.padding(toLength: 10, withPad: " ", startingAt: 0))  \(isolationText.padding(toLength: isoW, withPad: " ", startingAt: 0))  \(guiStatus)  \(labels)"
+            let line = "  \(runner.name.padding(toLength: nameW, withPad: " ", startingAt: 0))  \(target.padding(toLength: repoW, withPad: " ", startingAt: 0))  \(status.padding(toLength: 10, withPad: " ", startingAt: 0))  \(isolationText.padding(toLength: isoW, withPad: " ", startingAt: 0))  \(guiStatus)  \(labels)"
             print(line)
         }
     }
 
     @MainActor
     private static func handleAdd(args: [String]) async {
-        guard let repo = args.first, repo.contains("/") else {
-            print("Error: repository required in owner/repo format")
+        guard let target = args.first else {
+            print("Error: repository or organization required")
             print("Usage: mac-runner add <owner/repo> [--name <name>] [--labels <l1,l2>] [--isolation <mode>] [--enable-gui] [--open-files <limit>]")
+            print("       mac-runner add <org> --org [--name <name>] [--labels <l1,l2>] [--isolation <mode>] [--enable-gui] [--open-files <limit>]")
             return
         }
 
@@ -206,11 +216,18 @@ enum CLIHandler {
         var isolationMode: IsolationMode? = nil
         var enableGUI = false
         var openFileLimit: Int? = nil
+        var scope: RunnerScope = .repo
 
         // Parse optional flags
         var i = 1
         while i < args.count {
             switch args[i] {
+            case "--org":
+                scope = .org
+                i += 1
+            case "--repo":
+                scope = .repo
+                i += 1
             case "--name" where i + 1 < args.count:
                 name = args[i + 1]
                 i += 2
@@ -246,6 +263,20 @@ enum CLIHandler {
             }
         }
 
+        // Validate the identifier shape against the chosen scope.
+        switch scope {
+        case .repo:
+            guard target.contains("/") else {
+                print("Error: repository required in owner/repo format (or pass --org to register an organization runner)")
+                return
+            }
+        case .org:
+            guard !target.contains("/") else {
+                print("Error: --org expects an organization login only (no slashes)")
+                return
+            }
+        }
+
         // Check auth first
         let authState = await GHCLIService.shared.validateAuth()
         guard authState.isAuthenticated else {
@@ -253,12 +284,14 @@ enum CLIHandler {
             return
         }
 
-        print("Adding runner '\(name)' for \(repo)...")
+        let scopeLabel = scope == .org ? "\(target) (org)" : target
+        print("Adding runner '\(name)' for \(scopeLabel)...")
         let manager = RunnerManager()
         do {
             try await manager.addRunner(
                 name: name,
-                repo: repo,
+                repo: target,
+                scope: scope,
                 labels: labels,
                 isolationMode: isolationMode,
                 enableGUI: enableGUI,

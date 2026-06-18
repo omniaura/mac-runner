@@ -5,12 +5,14 @@ struct AddRunnerView: View {
     @Environment(\.dismiss) var dismiss
 
     @State private var repo = ""
+    @State private var scope: RunnerScope = .repo
     @State private var name = ""
     @State private var labelsText = "macos, mac-runner"
     @State private var selectedIsolation: IsolationSelection = .global
     @State private var enableGUI = false
     @State private var openFileLimitText = ""
     @State private var repoSections: [(header: String, repos: [String])] = []
+    @State private var orgs: [String] = []
     @State private var repoSearchText = ""
     @State private var isLoadingRepos = false
     @State private var showRepoPicker = false
@@ -68,14 +70,44 @@ struct AddRunnerView: View {
             // Form
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // Repository
+                    // Target Type (Repository vs Organization)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Repository")
+                        Text("Target Type")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        Picker("Target Type", selection: $scope) {
+                            Text("Repository").tag(RunnerScope.repo)
+                            Text("Organization").tag(RunnerScope.org)
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: scope) { _, _ in
+                            // Clear the identifier so users don't accidentally register
+                            // "omniaura/mac-runner" as an org or just "omniaura" as a repo.
+                            repo = ""
+                            showRepoPicker = false
+                        }
+
+                        if scope == .org {
+                            HStack(spacing: 6) {
+                                Image(systemName: "info.circle")
+                                    .foregroundColor(.secondary)
+                                    .font(.caption)
+                                Text("Requires org admin permission. Jobs from any repo in the org can target this runner.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    // Target identifier (repo or org)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(scope == .org ? "Organization" : "Repository")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
 
                         HStack {
-                            TextField("owner/repo", text: $repo)
+                            TextField(scope == .org ? "org-login" : "owner/repo", text: $repo)
                                 .textFieldStyle(.roundedBorder)
 
                             if isLoadingRepos {
@@ -88,71 +120,12 @@ struct AddRunnerView: View {
                             }
                         }
 
-                        if showRepoPicker, !repoSections.isEmpty {
-                            VStack(spacing: 0) {
-                                TextField("Search repos...", text: $repoSearchText)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.caption)
-                                    .padding(6)
-
-                                Divider()
-
-                                if filteredSections.isEmpty {
-                                    Text("No matching repos")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                        .padding(8)
-                                } else {
-                                    ScrollView {
-                                        VStack(alignment: .leading, spacing: 0) {
-                                            ForEach(filteredSections, id: \.header) { section in
-                                                Text(section.header)
-                                                    .font(.system(.caption2, design: .monospaced))
-                                                    .fontWeight(.semibold)
-                                                    .foregroundColor(.secondary)
-                                                    .padding(.horizontal, 8)
-                                                    .padding(.top, 8)
-                                                    .padding(.bottom, 4)
-
-                                                ForEach(section.repos, id: \.self) { r in
-                                                    Button(action: {
-                                                        repo = r
-                                                        showRepoPicker = false
-                                                        repoSearchText = ""
-                                                    }) {
-                                                        HStack {
-                                                            Text(r)
-                                                                .font(.system(.caption, design: .monospaced))
-                                                            Spacer()
-                                                            if r == repo {
-                                                                Image(systemName: "checkmark")
-                                                                    .foregroundColor(.accentColor)
-                                                                    .font(.caption)
-                                                            }
-                                                        }
-                                                        .contentShape(Rectangle())
-                                                        .padding(.vertical, 4)
-                                                        .padding(.horizontal, 8)
-                                                    }
-                                                    .buttonStyle(.plain)
-                                                }
-
-                                                if section.header != filteredSections.last?.header {
-                                                    Divider()
-                                                        .padding(.top, 4)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    .frame(maxHeight: 200)
-                                }
+                        if showRepoPicker {
+                            if scope == .repo, !repoSections.isEmpty {
+                                repoPickerList
+                            } else if scope == .org, !orgs.isEmpty {
+                                orgPickerList
                             }
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(6)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                            )
                         }
                     }
 
@@ -303,12 +276,143 @@ struct AddRunnerView: View {
         .frame(width: 400, height: 620)
     }
 
+    @ViewBuilder
+    private var repoPickerList: some View {
+        VStack(spacing: 0) {
+            TextField("Search repos...", text: $repoSearchText)
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+                .padding(6)
+
+            Divider()
+
+            if filteredSections.isEmpty {
+                Text("No matching repos")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(8)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(filteredSections, id: \.header) { section in
+                            Text(section.header)
+                                .font(.system(.caption2, design: .monospaced))
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.top, 8)
+                                .padding(.bottom, 4)
+
+                            ForEach(section.repos, id: \.self) { r in
+                                Button(action: {
+                                    repo = r
+                                    showRepoPicker = false
+                                    repoSearchText = ""
+                                }) {
+                                    HStack {
+                                        Text(r)
+                                            .font(.system(.caption, design: .monospaced))
+                                        Spacer()
+                                        if r == repo {
+                                            Image(systemName: "checkmark")
+                                                .foregroundColor(.accentColor)
+                                                .font(.caption)
+                                        }
+                                    }
+                                    .contentShape(Rectangle())
+                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 8)
+                                }
+                                .buttonStyle(.plain)
+                            }
+
+                            if section.header != filteredSections.last?.header {
+                                Divider()
+                                    .padding(.top, 4)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 200)
+            }
+        }
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(6)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private var orgPickerList: some View {
+        let filtered = repoSearchText.isEmpty
+            ? orgs
+            : orgs.filter { $0.lowercased().contains(repoSearchText.lowercased()) }
+
+        VStack(spacing: 0) {
+            TextField("Search orgs...", text: $repoSearchText)
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+                .padding(6)
+
+            Divider()
+
+            if filtered.isEmpty {
+                Text("No matching orgs")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(8)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(filtered, id: \.self) { org in
+                            Button(action: {
+                                repo = org
+                                showRepoPicker = false
+                                repoSearchText = ""
+                            }) {
+                                HStack {
+                                    Text(org)
+                                        .font(.system(.caption, design: .monospaced))
+                                    Spacer()
+                                    if org == repo {
+                                        Image(systemName: "checkmark")
+                                            .foregroundColor(.accentColor)
+                                            .font(.caption)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                                .padding(.vertical, 4)
+                                .padding(.horizontal, 8)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(maxHeight: 200)
+            }
+        }
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(6)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+        )
+    }
+
     private func loadRepos() async {
         isLoadingRepos = true
         defer { isLoadingRepos = false }
         errorMessage = nil
 
         do {
+            if scope == .org {
+                orgs = try await GHCLIService.shared.listOrgs().sorted()
+                showRepoPicker = true
+                return
+            }
+
             let allRepos = try await GHCLIService.shared.listAllRepos()
             var sections: [(header: String, repos: [String])] = []
 
@@ -355,10 +459,26 @@ struct AddRunnerView: View {
             return
         }
 
+        // Surface obvious format mistakes before hitting the network.
+        let trimmedRepo = repo.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch scope {
+        case .repo:
+            guard trimmedRepo.contains("/") else {
+                errorMessage = "Repository must be in 'owner/repo' format."
+                return
+            }
+        case .org:
+            guard !trimmedRepo.isEmpty, !trimmedRepo.contains("/") else {
+                errorMessage = "Organization must be the org login only (no slashes)."
+                return
+            }
+        }
+
         do {
             try await runnerManager.addRunners(
                 baseName: baseName,
-                repo: repo,
+                repo: trimmedRepo,
+                scope: scope,
                 labels: labels.isEmpty ? ["macos"] : labels,
                 count: numberOfInstances,
                 isolationMode: selectedIsolation.isolationMode,

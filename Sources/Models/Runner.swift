@@ -1,9 +1,28 @@
 import Foundation
 
+/// Whether a runner is registered against a single repository or an entire
+/// organization. Org-level runners can be picked up by any repository in the
+/// organization that the runner group grants access to.
+enum RunnerScope: String, Codable, Sendable {
+    case repo
+    case org
+
+    var displayName: String {
+        switch self {
+        case .repo: return "Repository"
+        case .org: return "Organization"
+        }
+    }
+}
+
 struct Runner: Identifiable, Codable, Sendable {
     let id: UUID
     var name: String
-    var repo: String  // Format: "owner/repo"
+    /// Target identifier. For `.repo` scope this is "owner/repo"; for `.org` scope this is the org login.
+    var repo: String
+    /// Whether this runner is registered to a single repository or an entire organization.
+    /// Defaults to `.repo` for backward compatibility with pre-v1.11 configs.
+    var scope: RunnerScope
     var labels: [String]
     var enabled: Bool
     var status: RunnerStatus
@@ -18,6 +37,7 @@ struct Runner: Identifiable, Codable, Sendable {
         id: UUID = UUID(),
         name: String,
         repo: String,
+        scope: RunnerScope = .repo,
         labels: [String] = ["macos", "mac-runner"],
         enabled: Bool = true,
         status: RunnerStatus = .stopped,
@@ -31,6 +51,7 @@ struct Runner: Identifiable, Codable, Sendable {
         self.id = id
         self.name = name
         self.repo = repo
+        self.scope = scope
         self.labels = labels
         self.enabled = enabled
         self.status = status
@@ -47,6 +68,8 @@ struct Runner: Identifiable, Codable, Sendable {
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         repo = try container.decode(String.self, forKey: .repo)
+        // Default to .repo for configs written before scope was introduced.
+        scope = try container.decodeIfPresent(RunnerScope.self, forKey: .scope) ?? .repo
         labels = try container.decode([String].self, forKey: .labels)
         enabled = try container.decode(Bool.self, forKey: .enabled)
         status = try container.decode(RunnerStatus.self, forKey: .status)
@@ -64,6 +87,11 @@ struct Runner: Identifiable, Codable, Sendable {
         )
     }
 
+    /// Convenience target descriptor pairing this runner's scope and identifier.
+    var target: RunnerTarget {
+        RunnerTarget(scope: scope, identifier: repo)
+    }
+
     /// Returns the effective isolation mode for this runner.
     ///
     /// If the runner has a specific isolation mode set, that is returned.
@@ -77,6 +105,39 @@ struct Runner: Identifiable, Codable, Sendable {
 
     func effectiveOpenFileLimit(global globalLimit: Int) -> Int {
         openFileLimit ?? globalLimit
+    }
+}
+
+/// A scope-aware identifier for GitHub Actions runner registration targets.
+///
+/// Encapsulates the dual nature of GitHub's runner API: repository-level
+/// runners live under `repos/{owner}/{repo}/...` while organization-level
+/// runners live under `orgs/{org}/...`. Both share the same registration
+/// download URL — `https://github.com/{identifier}` — which `config.sh`
+/// uses to phone home.
+struct RunnerTarget: Sendable, Equatable, Hashable {
+    let scope: RunnerScope
+    let identifier: String  // "owner/repo" for .repo, "org" for .org
+
+    /// REST API path prefix used by `gh api` calls (no leading slash).
+    var apiPath: String {
+        switch scope {
+        case .repo: return "repos/\(identifier)"
+        case .org:  return "orgs/\(identifier)"
+        }
+    }
+
+    /// URL passed to `config.sh --url` when registering the runner.
+    var registrationURL: String {
+        "https://github.com/\(identifier)"
+    }
+
+    /// Human-readable description suitable for log lines and CLI output.
+    var displayName: String {
+        switch scope {
+        case .repo: return identifier
+        case .org:  return "\(identifier) (org)"
+        }
     }
 }
 

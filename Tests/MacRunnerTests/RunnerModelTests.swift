@@ -219,6 +219,77 @@ final class RunnerModelTests: XCTestCase {
         XCTAssertEqual(runner.effectiveOpenFileLimit(global: 131072), 131072)
     }
 
+    // MARK: - Scope Tests
+
+    func testRunnerDefaultScopeIsRepo() {
+        let runner = Runner(name: "r", repo: "owner/repo")
+        XCTAssertEqual(runner.scope, .repo)
+        XCTAssertEqual(runner.target.scope, .repo)
+        XCTAssertEqual(runner.target.identifier, "owner/repo")
+    }
+
+    func testRunnerOrgScopeTarget() {
+        let runner = Runner(name: "r", repo: "acme", scope: .org)
+        XCTAssertEqual(runner.scope, .org)
+        XCTAssertEqual(runner.target.scope, .org)
+        XCTAssertEqual(runner.target.identifier, "acme")
+        XCTAssertEqual(runner.target.apiPath, "orgs/acme")
+        XCTAssertEqual(runner.target.registrationURL, "https://github.com/acme")
+        XCTAssertEqual(runner.target.displayName, "acme (org)")
+    }
+
+    func testRunnerRepoScopeTarget() {
+        let runner = Runner(name: "r", repo: "acme/api")
+        XCTAssertEqual(runner.target.apiPath, "repos/acme/api")
+        XCTAssertEqual(runner.target.registrationURL, "https://github.com/acme/api")
+        XCTAssertEqual(runner.target.displayName, "acme/api")
+    }
+
+    func testRunnerEncodingIncludesScopeWhenOrg() throws {
+        let runner = Runner(name: "r", repo: "acme", scope: .org)
+        let data = try JSONEncoder().encode(runner)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        XCTAssertEqual(json?["scope"] as? String, "org")
+        XCTAssertEqual(json?["repo"] as? String, "acme")
+    }
+
+    func testRunnerDecodingDefaultsScopeToRepoForLegacyConfigs() throws {
+        // Legacy config written before scope existed.
+        let json = """
+        {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "name": "legacy",
+            "repo": "owner/repo",
+            "labels": ["macos"],
+            "enabled": true,
+            "status": "stopped"
+        }
+        """.data(using: .utf8)!
+
+        let runner = try JSONDecoder().decode(Runner.self, from: json)
+        XCTAssertEqual(runner.scope, .repo)
+        XCTAssertEqual(runner.target.apiPath, "repos/owner/repo")
+    }
+
+    func testRunnerDecodingOrgScope() throws {
+        let json = """
+        {
+            "id": "00000000-0000-0000-0000-000000000002",
+            "name": "org-runner",
+            "repo": "acme",
+            "scope": "org",
+            "labels": ["macos"],
+            "enabled": true,
+            "status": "running"
+        }
+        """.data(using: .utf8)!
+
+        let runner = try JSONDecoder().decode(Runner.self, from: json)
+        XCTAssertEqual(runner.scope, .org)
+        XCTAssertEqual(runner.repo, "acme")
+        XCTAssertEqual(runner.target.apiPath, "orgs/acme")
+    }
+
     // MARK: - Runner Status Tests
 
     func testRunnerStatusIcon() {
