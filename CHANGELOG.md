@@ -1,3 +1,10 @@
+## [1.17.1](https://github.com/omniaura/mac-runner/compare/v1.17.0...v1.17.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* trigger semantic release ([#72](https://github.com/omniaura/mac-runner/issues/72)) ([ef9a1e6](https://github.com/omniaura/mac-runner/commit/ef9a1e633ba42716b6661bfa07d3f34a826fd1c5))
+
 # [1.17.0](https://github.com/omniaura/mac-runner/compare/v1.16.0...v1.17.0) (2026-06-18)
 
 
