@@ -417,207 +417,218 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             // General Tab
-            VStack(alignment: .leading, spacing: 16) {
-                Text("General")
-                    .font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("General")
+                        .font(.headline)
 
-                Toggle("Launch at Login", isOn: Binding(
-                    get: { runnerManager.currentSettings.startOnLogin },
-                    set: { newValue in
-                        var settings = runnerManager.currentSettings
-                        settings.startOnLogin = newValue
-                        runnerManager.updateSettings(settings)
-                    }
-                ))
-
-                Text("When enabled, Mac Runner starts automatically when you log in and restarts any runners that were previously running.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                Toggle("Check for Updates Automatically", isOn: Binding(
-                    get: { runnerManager.currentSettings.autoCheckForUpdates },
-                    set: { newValue in
-                        var settings = runnerManager.currentSettings
-                        settings.autoCheckForUpdates = newValue
-                        runnerManager.updateSettings(settings)
-                    }
-                ))
-
-                Text("Checks the latest GitHub release on launch, then uses a 24-hour backoff with a 5-minute response cache for manual refreshes.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                Toggle("Auto-Restart on Crash", isOn: Binding(
-                    get: { runnerManager.currentSettings.autoRestartEnabled },
-                    set: { newValue in
-                        var settings = runnerManager.currentSettings
-                        settings.autoRestartEnabled = newValue
-                        runnerManager.updateSettings(settings)
-                    }
-                ))
-
-                HStack {
-                    Text("Max retries in 10 minutes")
-                    Spacer()
-                    Stepper(
-                        value: Binding(
-                            get: { runnerManager.currentSettings.autoRestartMaxRetries },
-                            set: { newValue in
-                                var settings = runnerManager.currentSettings
-                                settings.autoRestartMaxRetries = max(1, newValue)
-                                runnerManager.updateSettings(settings)
-                            }
-                        ),
-                        in: 1...20
-                    ) {
-                        Text("\(runnerManager.currentSettings.autoRestartMaxRetries)")
-                            .monospacedDigit()
-                    }
-                    .labelsHidden()
-                }
-
-                Text("Crash recovery uses exponential backoff (5s, 10s, 20s, capped at 60s).")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                Toggle("Job Notifications", isOn: Binding(
-                    get: { runnerManager.currentSettings.notificationsEnabled },
-                    set: { newValue in
-                        var settings = runnerManager.currentSettings
-                        settings.notificationsEnabled = newValue
-                        runnerManager.updateSettings(settings)
-                    }
-                ))
-
-                Text("Show native macOS notifications when a runner starts a job and when that job completes. Clicking a notification opens the GitHub Actions run.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Default Open Files Limit")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-
-                    TextField("Open files limit", value: Binding(
-                        get: { runnerManager.currentSettings.openFileLimit },
+                    Toggle("Launch at Login", isOn: Binding(
+                        get: { runnerManager.currentSettings.startOnLogin },
                         set: { newValue in
                             var settings = runnerManager.currentSettings
-                            settings.openFileLimit = max(1, newValue)
-                            runnerManager.updateSettings(settings)
-                        }
-                    ), formatter: openFileLimitFormatter)
-                    .textFieldStyle(.roundedBorder)
-
-                    Text("Applied to runners by default across non-isolated, dedicated-user, and container modes unless a runner overrides it.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Extra CI Tools")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-
-                    TextField("jq, pnpm, ...", text: Binding(
-                        get: { runnerManager.currentSettings.tools.extraPackages.joined(separator: ", ") },
-                        set: { newValue in
-                            var settings = runnerManager.currentSettings
-                            settings.tools = ToolProvisioningSettings(
-                                extraPackages: newValue
-                                    .components(separatedBy: ",")
-                                    .map {
-                                        $0.trimmingCharacters(in: .whitespacesAndNewlines)
-                                    }
-                            )
+                            settings.startOnLogin = newValue
                             runnerManager.updateSettings(settings)
                         }
                     ))
-                    .textFieldStyle(.roundedBorder)
 
-                    Text("New runners always provision gh, detect common language toolchains from repo metadata, and install any extra Homebrew packages listed here.")
+                    Text("When enabled, Mac Runner starts automatically when you log in and restarts any runners that were previously running.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+
+                    Toggle("Check for Updates Automatically", isOn: Binding(
+                        get: { runnerManager.currentSettings.autoCheckForUpdates },
+                        set: { newValue in
+                            var settings = runnerManager.currentSettings
+                            settings.autoCheckForUpdates = newValue
+                            runnerManager.updateSettings(settings)
+                        }
+                    ))
+
+                    Text("Checks the latest GitHub release on launch, then uses a 24-hour backoff with a 5-minute response cache for manual refreshes.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Toggle("Auto-Restart on Crash", isOn: Binding(
+                        get: { runnerManager.currentSettings.autoRestartEnabled },
+                        set: { newValue in
+                            var settings = runnerManager.currentSettings
+                            settings.autoRestartEnabled = newValue
+                            runnerManager.updateSettings(settings)
+                        }
+                    ))
+
+                    HStack {
+                        Text("Max retries in 10 minutes")
+                        Spacer()
+                        Stepper(
+                            value: Binding(
+                                get: { runnerManager.currentSettings.autoRestartMaxRetries },
+                                set: { newValue in
+                                    var settings = runnerManager.currentSettings
+                                    settings.autoRestartMaxRetries = max(1, newValue)
+                                    runnerManager.updateSettings(settings)
+                                }
+                            ),
+                            in: 1...20
+                        ) {
+                            Text("\(runnerManager.currentSettings.autoRestartMaxRetries)")
+                                .monospacedDigit()
+                        }
+                        .labelsHidden()
+                    }
+
+                    Text("Crash recovery uses exponential backoff (5s, 10s, 20s, capped at 60s).")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Toggle("Job Notifications", isOn: Binding(
+                        get: { runnerManager.currentSettings.notificationsEnabled },
+                        set: { newValue in
+                            var settings = runnerManager.currentSettings
+                            settings.notificationsEnabled = newValue
+                            runnerManager.updateSettings(settings)
+                        }
+                    ))
+
+                    Text("Show native macOS notifications when a runner starts a job and when that job completes. Clicking a notification opens the GitHub Actions run.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Default Open Files Limit")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        TextField("Open files limit", value: Binding(
+                            get: { runnerManager.currentSettings.openFileLimit },
+                            set: { newValue in
+                                var settings = runnerManager.currentSettings
+                                settings.openFileLimit = max(1, newValue)
+                                runnerManager.updateSettings(settings)
+                            }
+                        ), formatter: openFileLimitFormatter)
+                        .textFieldStyle(.roundedBorder)
+
+                        Text("Applied to runners by default across non-isolated, dedicated-user, and container modes unless a runner overrides it.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Extra CI Tools")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        TextField("jq, pnpm, ...", text: Binding(
+                            get: { runnerManager.currentSettings.tools.extraPackages.joined(separator: ", ") },
+                            set: { newValue in
+                                var settings = runnerManager.currentSettings
+                                settings.tools = ToolProvisioningSettings(
+                                    extraPackages: newValue
+                                        .components(separatedBy: ",")
+                                        .map {
+                                            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        }
+                                )
+                                runnerManager.updateSettings(settings)
+                            }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+
+                        Text("New runners always provision gh, detect common language toolchains from repo metadata, and install any extra Homebrew packages listed here.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
-                Spacer()
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding()
             .tabItem { Label("General", systemImage: "gear") }
 
             // GitHub Tab
-            VStack(alignment: .leading, spacing: 16) {
-                Text("GitHub Authentication")
-                    .font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("GitHub Authentication")
+                        .font(.headline)
 
-                HStack {
-                    Circle()
-                        .fill(isAuthenticated ? Color.green : Color.red)
-                        .frame(width: 10, height: 10)
-                    Text(isAuthenticated ? "Authenticated" : "Not authenticated")
-                }
-
-                Text(authStatusText)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .textSelection(.enabled)
-
-                if !isAuthenticated {
-                    Button(action: {
-                        Task { await login() }
-                    }) {
-                        Label("Sign in with GitHub", systemImage: "person.badge.key")
+                    HStack {
+                        Circle()
+                            .fill(isAuthenticated ? Color.green : Color.red)
+                            .frame(width: 10, height: 10)
+                        Text(isAuthenticated ? "Authenticated" : "Not authenticated")
                     }
-                    .disabled(isLoggingIn)
-                }
 
-                Spacer()
+                    Text(authStatusText)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+
+                    if !isAuthenticated {
+                        Button(action: {
+                            Task { await login() }
+                        }) {
+                            Label("Sign in with GitHub", systemImage: "person.badge.key")
+                        }
+                        .disabled(isLoggingIn)
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding()
             .tabItem { Label("GitHub", systemImage: "lock.shield") }
 
             // About Tab
-            VStack(spacing: 12) {
-                Image(systemName: "figure.run")
-                    .font(.system(size: 48))
-                    .foregroundColor(.accentColor)
+            GeometryReader { proxy in
+                ScrollView {
+                    VStack(spacing: 12) {
+                        Spacer(minLength: 0)
 
-                Text("Mac Runner")
-                    .font(.title2)
-                    .bold()
+                        Image(systemName: "figure.run")
+                            .font(.system(size: 48))
+                            .foregroundColor(.accentColor)
 
-                Text("Version \(CLIHandler.version)")
-                    .foregroundColor(.secondary)
+                        Text("Mac Runner")
+                            .font(.title2)
+                            .bold()
 
-                if let update = runnerManager.availableUpdate {
-                    Text("Update available: \(update.latestVersion)")
-                        .font(.caption)
-                        .foregroundColor(.accentColor)
-                } else {
-                    Text(runnerManager.updateStatusMessage)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                }
+                        Text("Version \(CLIHandler.version)")
+                            .foregroundColor(.secondary)
 
-                Button(action: {
-                    Task {
-                        await runnerManager.checkForUpdates(force: true)
+                        if let update = runnerManager.availableUpdate {
+                            Text("Update available: \(update.latestVersion)")
+                                .font(.caption)
+                                .foregroundColor(.accentColor)
+                        } else {
+                            Text(runnerManager.updateStatusMessage)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+
+                        Button(action: {
+                            Task {
+                                await runnerManager.checkForUpdates(force: true)
+                            }
+                        }) {
+                            Label("Check for Updates", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(runnerManager.isCheckingForUpdates)
+
+                        Text("GitHub Actions self-hosted runner manager for macOS")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+
+                        Spacer(minLength: 0)
                     }
-                }) {
-                    Label("Check for Updates", systemImage: "arrow.clockwise")
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: proxy.size.height)
                 }
-                .disabled(runnerManager.isCheckingForUpdates)
-
-                Text("GitHub Actions self-hosted runner manager for macOS")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-
-                Spacer()
             }
-            .padding()
             .tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(minWidth: 400, minHeight: 300)
+        .frame(minWidth: 400, minHeight: 420)
         .task {
             await checkAuth()
         }
