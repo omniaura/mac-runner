@@ -99,7 +99,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let window = NSWindow(contentViewController: hostingController)
         window.title = "Mac Runner Settings"
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 400, height: 300))
+        window.setContentSize(NSSize(width: 400, height: 420))
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
