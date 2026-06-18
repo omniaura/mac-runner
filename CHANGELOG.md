@@ -1,3 +1,10 @@
+# [1.17.0](https://github.com/omniaura/mac-runner/compare/v1.16.0...v1.17.0) (2026-06-18)
+
+
+### Features
+
+* register org-level GitHub Actions runners ([#71](https://github.com/omniaura/mac-runner/issues/71)) ([d7a2458](https://github.com/omniaura/mac-runner/commit/d7a24589d87879aaad4d6b6e579234911201a2a0))
+
 # [1.16.0](https://github.com/omniaura/mac-runner/compare/v1.15.0...v1.16.0) (2026-05-03)
 
 
