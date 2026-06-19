@@ -1,6 +1,6 @@
 cask "mac-runner" do
-  version "1.17.1"
-  sha256 "bf6a5a83c81828e9b147c885dbc32e59a3f219f980d4a8562dac359ae564a8bf"
+  version "1.17.2"
+  sha256 "5f8090560e4d9f74ef19ff5a0711d87b163c141893df3ba8c1579be048ded928"
 
   url "https://github.com/omniaura/mac-runner/releases/download/v#{version}/MacRunner-#{version}.zip"
   name "Mac Runner"
