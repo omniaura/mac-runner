@@ -96,6 +96,7 @@ class RunnerInstaller {
             process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/bash")
             process.arguments = ["-c", configCommand]
+            process.environment = RunnerEnvironment.environment(enableGUI: false)
 
         case .dedicatedUser(let username):
             // Run config.sh as the service user
@@ -113,6 +114,13 @@ class RunnerInstaller {
         guard process.terminationStatus == 0 else {
             let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
             throw InstallerError.configurationFailed(output)
+        }
+
+        if isolation == .none || isolation == .container {
+            try RunnerEnvironment.writePathSnapshot(
+                in: directory,
+                environment: RunnerEnvironment.environment(enableGUI: false)
+            )
         }
 
         print("Runner configured successfully")

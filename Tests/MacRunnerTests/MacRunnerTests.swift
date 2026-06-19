@@ -143,6 +143,69 @@ final class MacRunnerTests: XCTestCase {
         XCTAssertEqual(ResourceLimits.shellCommand("echo test", openFileLimit: 0), "echo test")
     }
 
+    func testRunnerEnvironmentPrependsHomebrewPathsToLaunchServicesPath() {
+        let path = RunnerEnvironment.normalizedPath("/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin")
+
+        XCTAssertTrue(path.hasPrefix("/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:"))
+        XCTAssertEqual(path.components(separatedBy: ":").filter { $0 == "/usr/local/bin" }.count, 1)
+    }
+
+    func testRunnerEnvironmentMarksHeadlessRuns() {
+        let environment = RunnerEnvironment.environment(
+            from: [
+                "PATH": "/usr/bin:/bin",
+                "DISPLAY": ":0",
+                "WAYLAND_DISPLAY": "wayland-0",
+                "XDG_SESSION_TYPE": "x11",
+                "XDG_RUNTIME_DIR": "/tmp/runtime",
+            ],
+            enableGUI: false
+        )
+
+        XCTAssertNil(environment["DISPLAY"])
+        XCTAssertNil(environment["WAYLAND_DISPLAY"])
+        XCTAssertNil(environment["XDG_SESSION_TYPE"])
+        XCTAssertNil(environment["XDG_RUNTIME_DIR"])
+        XCTAssertEqual(environment["CI"], "true")
+        XCTAssertEqual(environment["HEADLESS"], "true")
+        XCTAssertTrue(environment["PATH"]?.contains("/opt/homebrew/bin") == true)
+    }
+
+    func testRunnerEnvironmentPreservesGUIVariablesWhenEnabled() {
+        let environment = RunnerEnvironment.environment(
+            from: [
+                "PATH": "/usr/bin:/bin",
+                "DISPLAY": ":0",
+            ],
+            enableGUI: true
+        )
+
+        XCTAssertEqual(environment["DISPLAY"], ":0")
+        XCTAssertNil(environment["CI"])
+        XCTAssertNil(environment["HEADLESS"])
+    }
+
+    func testRunnerEnvironmentWritesPathSnapshot() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        try RunnerEnvironment.writePathSnapshot(
+            in: temporaryDirectory.path,
+            environment: ["PATH": "/usr/bin:/bin"]
+        )
+
+        let written = try String(
+            contentsOf: temporaryDirectory.appendingPathComponent(".path"),
+            encoding: .utf8
+        )
+        XCTAssertEqual(
+            written,
+            "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin\n"
+        )
+    }
+
     func testAdministratorAuthenticationProcessUsesInteractiveTerminalHandles() {
         let process = UserIsolationService.makeAdministratorAuthenticationProcess()
 
