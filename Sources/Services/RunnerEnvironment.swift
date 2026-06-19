@@ -55,4 +55,22 @@ enum RunnerEnvironment {
 
         try (path + "\n").write(to: pathFile, atomically: true, encoding: .utf8)
     }
+
+    static func pathSnapshotNeedsRefresh(in runnerDirectory: String) -> Bool {
+        let pathFile = URL(fileURLWithPath: runnerDirectory)
+            .appendingPathComponent(".path")
+
+        guard let snapshot = try? String(contentsOf: pathFile, encoding: .utf8) else {
+            return true
+        }
+
+        let entries = Set(
+            snapshot
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .split(separator: ":", omittingEmptySubsequences: true)
+                .map(String.init)
+        )
+
+        return !preferredPathEntries.allSatisfy { entries.contains($0) }
+    }
 }
