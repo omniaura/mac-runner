@@ -48,19 +48,9 @@ class ProcessManager {
             proc.standardOutput = logHandle
             proc.standardError = logHandle
 
-            // Configure environment for headless mode (remove GUI access)
-            if !enableGUI {
-                var env = ProcessInfo.processInfo.environment
-                // Remove GUI-related environment variables
-                env.removeValue(forKey: "DISPLAY")
-                env.removeValue(forKey: "WAYLAND_DISPLAY")
-                env.removeValue(forKey: "XDG_SESSION_TYPE")
-                env.removeValue(forKey: "XDG_RUNTIME_DIR")
-                // Explicitly mark as headless
-                env["CI"] = "true"
-                env["HEADLESS"] = "true"
-                proc.environment = env
-            }
+            let env = RunnerEnvironment.environment(enableGUI: enableGUI)
+            try RunnerEnvironment.writePathSnapshot(in: workingDirectory, environment: env)
+            proc.environment = env
 
             do {
                 try proc.run()
