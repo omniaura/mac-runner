@@ -336,6 +336,19 @@ final class MacRunnerTests: XCTestCase {
         XCTAssertEqual(state.recoveryMessage, "GitHub authentication expired or is invalid. Run: gh auth login")
     }
 
+    func testRegistrationTokenFailureAddsAdminOrgRecoveryCommand() {
+        let message = """
+        gh: You must be an org admin or have the runners and runner groups fine-grained permission. (HTTP 403)
+        This API operation needs the "admin:org" scope.
+        """
+
+        let recovery = GHCLIService.registrationTokenFailureMessage(from: message)
+
+        XCTAssertTrue(GHCLIService.requiresAdminOrgScope(recovery))
+        XCTAssertTrue(recovery.contains(GitHubAuthRecovery.adminOrgRefreshCommand))
+        XCTAssertTrue(recovery.contains(message))
+    }
+
     func testJobNotificationPayloadFactoryBuildsStartedPayload() {
         let runner = Runner(name: "runner-1", repo: "omniaura/mac-runner")
         let run = WorkflowRunSummary(

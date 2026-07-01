@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct AddRunnerView: View {
@@ -20,6 +21,7 @@ struct AddRunnerView: View {
     @State private var isAdding = false
     @State private var addingProgress: (current: Int, total: Int)?
     @State private var errorMessage: String?
+    @State private var recoveryStatusMessage: String?
 
     enum IsolationSelection: String, CaseIterable, Identifiable {
         case global = "Global (from settings)"
@@ -48,6 +50,11 @@ struct AddRunnerView: View {
             let filtered = section.repos.filter { $0.lowercased().contains(query) }
             return filtered.isEmpty ? nil : (header: section.header, repos: filtered)
         }
+    }
+
+    private var shouldShowAdminOrgRecovery: Bool {
+        guard let errorMessage else { return false }
+        return GHCLIService.requiresAdminOrgScope(errorMessage)
     }
 
     var body: some View {
@@ -234,9 +241,14 @@ struct AddRunnerView: View {
                     }
 
                     if let error = errorMessage {
-                        Text(error)
-                            .foregroundColor(.red)
-                            .font(.caption)
+                        ErrorRecoveryView(
+                            message: error,
+                            showAdminOrgRecovery: shouldShowAdminOrgRecovery,
+                            recoveryStatusMessage: recoveryStatusMessage,
+                            onCopyError: { copyToPasteboard(error) },
+                            onCopyCommand: { copyToPasteboard(GitHubAuthRecovery.adminOrgRefreshCommand) },
+                            onOpenReauth: openAdminOrgReauth
+                        )
                     }
                 }
                 .padding()
@@ -273,7 +285,7 @@ struct AddRunnerView: View {
             }
             .padding()
         }
-        .frame(width: 400, height: 620)
+        .frame(width: 420, height: 680)
     }
 
     @ViewBuilder
@@ -405,6 +417,7 @@ struct AddRunnerView: View {
         isLoadingRepos = true
         defer { isLoadingRepos = false }
         errorMessage = nil
+        recoveryStatusMessage = nil
 
         do {
             if scope == .org {
@@ -438,6 +451,7 @@ struct AddRunnerView: View {
             addingProgress = nil
         }
         errorMessage = nil
+        recoveryStatusMessage = nil
 
         let baseName = name.isEmpty
             ? "mac-runner-\(Int.random(in: 1000...9999))"
@@ -492,5 +506,92 @@ struct AddRunnerView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+        recoveryStatusMessage = "Copied."
+    }
+
+    private func openAdminOrgReauth() {
+        do {
+            try GHCLIService.shared.openAdminOrgReauth()
+            recoveryStatusMessage = "Opened GitHub reauth. The device code is on your clipboard."
+        } catch {
+            recoveryStatusMessage = "Could not open reauth: \(error.localizedDescription)"
+        }
+    }
+}
+
+private struct ErrorRecoveryView: View {
+    let message: String
+    let showAdminOrgRecovery: Bool
+    let recoveryStatusMessage: String?
+    let onCopyError: () -> Void
+    let onCopyCommand: () -> Void
+    let onOpenReauth: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.red)
+                Text(message)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if showAdminOrgRecovery {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Request the missing org-admin scope:")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Text(GitHubAuthRecovery.adminOrgRefreshCommand)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.secondary.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                    HStack {
+                        Button {
+                            onCopyCommand()
+                        } label: {
+                            Label("Copy Command", systemImage: "doc.on.doc")
+                        }
+
+                        Button {
+                            onOpenReauth()
+                        } label: {
+                            Label("Open Reauth", systemImage: "safari")
+                        }
+
+                        Spacer()
+                    }
+                }
+            }
+
+            HStack {
+                Button {
+                    onCopyError()
+                } label: {
+                    Label("Copy Error", systemImage: "doc.on.clipboard")
+                }
+
+                if let recoveryStatusMessage {
+                    Text(recoveryStatusMessage)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.red.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }

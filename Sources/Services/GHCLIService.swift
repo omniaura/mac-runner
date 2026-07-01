@@ -44,6 +44,11 @@ struct GitHubAuthState: Sendable, Equatable {
     }
 }
 
+struct GitHubAuthRecovery: Sendable, Equatable {
+    static let adminOrgScope = "admin:org"
+    static let adminOrgRefreshCommand = "gh auth refresh -h github.com -s admin:org"
+}
+
 final class GHCLIService: Sendable {
     static let shared = GHCLIService()
 
@@ -128,6 +133,20 @@ final class GHCLIService: Sendable {
         guard result.exitCode == 0 else {
             throw GHError.authFailed(result.stderr)
         }
+    }
+
+    func openAdminOrgReauth() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: ghPath)
+        process.arguments = [
+            "auth", "refresh",
+            "-h", "github.com",
+            "-s", GitHubAuthRecovery.adminOrgScope,
+            "--clipboard"
+        ]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
     }
 
     func authStatus() async -> String {
@@ -270,9 +289,29 @@ final class GHCLIService: Sendable {
             "--jq", ".token"
         ])
         guard result.exitCode == 0, !result.stdout.isEmpty else {
-            throw GHError.apiFailed("Failed to get registration token: \(result.stderr)")
+            let detail = Self.registrationTokenFailureMessage(from: result.stderr)
+            throw GHError.apiFailed("Failed to get registration token: \(detail)")
         }
         return result.stdout
+    }
+
+    static func registrationTokenFailureMessage(from stderr: String) -> String {
+        guard requiresAdminOrgScope(stderr) else {
+            return stderr
+        }
+
+        return """
+        \(stderr)
+
+        To request the missing scope, run:
+        \(GitHubAuthRecovery.adminOrgRefreshCommand)
+        """
+    }
+
+    static func requiresAdminOrgScope(_ message: String) -> Bool {
+        let lowercased = message.lowercased()
+        return lowercased.contains(GitHubAuthRecovery.adminOrgScope)
+            || lowercased.contains("runners and runner groups")
     }
 
     func listRemoteRunners(for repo: String) async throws -> [RemoteRunner] {
