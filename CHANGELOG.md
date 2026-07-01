@@ -1,3 +1,10 @@
+## [1.17.3](https://github.com/omniaura/mac-runner/compare/v1.17.2...v1.17.3) (2026-07-01)
+
+
+### Bug Fixes
+
+* improve org runner reauth UX ([#76](https://github.com/omniaura/mac-runner/issues/76)) ([3facef1](https://github.com/omniaura/mac-runner/commit/3facef192ea77bb6d48d9919ac6b90e321753388))
+
 ## [1.17.2](https://github.com/omniaura/mac-runner/compare/v1.17.1...v1.17.2) (2026-06-19)
 
 
