@@ -206,6 +206,44 @@ final class MacRunnerTests: XCTestCase {
         )
     }
 
+    func testRunnerEnvironmentDetectsMissingPathSnapshot() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        XCTAssertTrue(RunnerEnvironment.pathSnapshotNeedsRefresh(in: temporaryDirectory.path))
+    }
+
+    func testRunnerEnvironmentDetectsStalePathSnapshotMissingHomebrewEntries() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        try "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin\n".write(
+            to: temporaryDirectory.appendingPathComponent(".path"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(RunnerEnvironment.pathSnapshotNeedsRefresh(in: temporaryDirectory.path))
+    }
+
+    func testRunnerEnvironmentAcceptsCurrentPathSnapshotWithPreferredEntries() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        try RunnerEnvironment.writePathSnapshot(
+            in: temporaryDirectory.path,
+            environment: ["PATH": "/usr/bin:/bin"]
+        )
+
+        XCTAssertFalse(RunnerEnvironment.pathSnapshotNeedsRefresh(in: temporaryDirectory.path))
+    }
+
     func testAdministratorAuthenticationProcessUsesInteractiveTerminalHandles() {
         let process = UserIsolationService.makeAdministratorAuthenticationProcess()
 

@@ -389,7 +389,11 @@ class RunnerManager: ObservableObject {
     /// but whose processes are no longer alive (e.g., after app restart or crash).
     /// Only restarts runners that were in the auto-restart set.
     func autoRestartRunners() async {
-        guard !runnersToAutoRestart.isEmpty else { return }
+        if runnersToAutoRestart.isEmpty {
+            await restartRunnersWithStalePathSnapshots()
+            return
+        }
+
         let ids = runnersToAutoRestart
         runnersToAutoRestart.removeAll()
 
@@ -403,6 +407,8 @@ class RunnerManager: ObservableObject {
                 }
             }
         }
+
+        await restartRunnersWithStalePathSnapshots()
     }
 
     // MARK: - Runner Management
@@ -824,6 +830,7 @@ class RunnerManager: ObservableObject {
         // group purely by `repo` string: an org-level runner and a repo-level runner can
         // share an identifier prefix, and the GitHub API endpoints differ by scope.
         let runnersByTarget = Dictionary(grouping: runners) { $0.target }
+        var becameIdleRunnerIDs = Set<UUID>()
 
         for (target, runnersInTarget) in runnersByTarget {
             // Only check runners that are currently running
@@ -849,6 +856,7 @@ class RunnerManager: ObservableObject {
                             await handleJobStarted(for: runners[index])
                         } else {
                             await handleJobCompleted(for: runners[index])
+                            becameIdleRunnerIDs.insert(runner.id)
                         }
                     }
                 }
@@ -858,6 +866,10 @@ class RunnerManager: ObservableObject {
                 // Don't save config for transient busy state changes
                 objectWillChange.send()
             }
+        }
+
+        if !becameIdleRunnerIDs.isEmpty {
+            await restartRunnersWithStalePathSnapshots(candidateIDs: becameIdleRunnerIDs)
         }
     }
 
@@ -1232,6 +1244,77 @@ class RunnerManager: ObservableObject {
             }
         }
         scheduledRestarts.removeAll()
+    }
+
+    private func restartRunnersWithStalePathSnapshots(candidateIDs: Set<UUID>? = nil) async {
+        var staleRunnerIDs: [UUID] = []
+        let runnerSnapshot = runners
+
+        for runner in runnerSnapshot {
+            guard runner.status == .running else { continue }
+            guard !runner.busy else { continue }
+            if let candidateIDs {
+                guard candidateIDs.contains(runner.id) else { continue }
+            }
+
+            let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
+            guard isolation != .container else { continue }
+            guard processManager.isProcessAlive(for: runner.id) else { continue }
+            guard let runnerDir = try? RunnerDirectory.path(for: runner.id, isolation: isolation) else { continue }
+            guard RunnerEnvironment.pathSnapshotNeedsRefresh(in: runnerDir) else { continue }
+            guard await runnerIsConfirmedIdle(runner) else { continue }
+
+            staleRunnerIDs.append(runner.id)
+        }
+
+        for id in staleRunnerIDs {
+            await restartRunnerForPathSnapshotRefresh(id)
+        }
+    }
+
+    private func runnerIsConfirmedIdle(_ runner: Runner) async -> Bool {
+        guard let remoteRunners = try? await ghService.listRemoteRunners(for: runner.target),
+              let remoteRunner = remoteRunners.first(where: { $0.name == runner.name }) else {
+            return false
+        }
+
+        if let index = runners.firstIndex(where: { $0.id == runner.id }) {
+            runners[index].busy = remoteRunner.busy
+        }
+
+        return !remoteRunner.busy
+    }
+
+    private func restartRunnerForPathSnapshotRefresh(_ id: UUID) async {
+        guard let index = runners.firstIndex(where: { $0.id == id }) else { return }
+        guard runners[index].status == .running else { return }
+        guard !runners[index].busy else { return }
+
+        let runner = runners[index]
+        guard await runnerIsConfirmedIdle(runner) else { return }
+
+        logRunnerEvent(
+            for: runner,
+            message: "Runner PATH snapshot is stale; restarting to apply current Homebrew tool paths."
+        )
+
+        do {
+            try await stopRunner(id)
+            try await startRunner(id)
+
+            if let refreshedIndex = runners.firstIndex(where: { $0.id == id }) {
+                runners[refreshedIndex].lastRestartEvent = "Runner restarted to apply current Homebrew tool paths."
+                logRunnerEvent(for: runners[refreshedIndex], message: runners[refreshedIndex].lastRestartEvent ?? "")
+                saveConfiguration()
+            }
+        } catch {
+            if let refreshedIndex = runners.firstIndex(where: { $0.id == id }) {
+                runners[refreshedIndex].status = .error
+                runners[refreshedIndex].lastRestartEvent = "Failed to refresh runner PATH: \(error.localizedDescription)"
+                logRunnerEvent(for: runners[refreshedIndex], message: runners[refreshedIndex].lastRestartEvent ?? "")
+                saveConfiguration()
+            }
+        }
     }
 
     private func logRunnerEvent(for runner: Runner, message: String) {
