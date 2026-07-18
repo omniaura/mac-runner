@@ -1,7 +1,7 @@
 import Foundation
 
 #if canImport(Containerization)
-import Containerization
+@preconcurrency import Containerization
 #endif
 
 /// Service for managing container-based isolation of GitHub Actions runners.
@@ -21,6 +21,7 @@ import Containerization
 /// - Mounted workspace directory
 /// - GitHub Actions runner environment
 @available(macOS 26.0, *)
+@MainActor
 class ContainerIsolationService {
     #if canImport(Containerization)
     // MARK: - Properties
@@ -103,12 +104,7 @@ class ContainerIsolationService {
         // Determine which container image to use
         let imageReference = config.containerImage ?? ContainerRunnerConfiguration.defaultRunnerImage
 
-        // Create container with specified configuration
-        let container = try await manager.create(
-            id,
-            reference: imageReference,
-            rootfsSizeInBytes: config.diskSizeInBytes
-        ) { containerConfig in
+        let configuration: @Sendable (inout LinuxContainer.Configuration) -> Void = { containerConfig in
             // Resource allocation
             containerConfig.cpus = config.cpuCount
             containerConfig.memoryInBytes = config.memoryInBytes
@@ -146,12 +142,18 @@ class ContainerIsolationService {
             // Set environment variables
             containerConfig.process.environmentVariables.append("RUNNER_ALLOW_RUNASROOT=1")
 
-            // Enable nested virtualization if requested
             if config.enableNestedVirtualization {
-                // Note: This may not be supported in all versions of the framework
-                // containerConfig.enableNestedVirtualization = true
+                // Reserved for framework support.
             }
         }
+
+        // Create container with specified configuration
+        let container = try await manager.create(
+            id,
+            reference: imageReference,
+            rootfsSizeInBytes: config.diskSizeInBytes,
+            configuration: configuration
+        )
 
         // Store mutated manager back
         self.containerManager = manager

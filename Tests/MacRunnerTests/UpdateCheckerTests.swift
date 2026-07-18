@@ -97,7 +97,13 @@ final class UpdateCheckerTests: XCTestCase {
 
     func testHomebrewInstallDetectionUsesCellarPaths() {
         XCTAssertEqual(UpdateChecker.installSource(for: "/opt/homebrew/Cellar/mac-runner/1.2.3/Mac Runner.app"), .homebrewFormula)
-        XCTAssertEqual(UpdateChecker.installSource(for: "/Applications/Mac Runner.app"), .directDownload)
+        XCTAssertEqual(
+            UpdateChecker.installSource(
+                for: "/Applications/Mac Runner.app",
+                fileExists: { _ in false }
+            ),
+            .directDownload
+        )
     }
 
     func testHomebrewInstallDetectionUsesCaskReceipt() {
