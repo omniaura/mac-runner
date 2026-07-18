@@ -9,6 +9,12 @@ import Containerization
 
 @MainActor
 class RunnerManager: ObservableObject {
+    enum LoginItemAction: Equatable {
+        case register
+        case unregister
+        case none
+    }
+
     private enum UpdateStatusMessages {
         static let defaultAutomaticChecks = "Checks GitHub releases on launch and once per day."
         static let alreadyChecking = "Update check already in progress."
@@ -96,7 +102,7 @@ class RunnerManager: ObservableObject {
         }
 
         reconcileRunnerStates()
-        syncLoginItem()
+        reconcileLoginItemSetting()
         startStatusPolling()
     }
 
@@ -352,32 +358,48 @@ class RunnerManager: ObservableObject {
 
     // MARK: - Login Item
 
-    /// Synchronize the macOS login item registration with current settings.
+    /// Reconcile the persisted setting with the current macOS login item state.
     ///
-    /// First reconciles the config with the actual OS state (in case the user toggled
-    /// the login item via System Settings), then registers or unregisters as needed.
+    /// This is intentionally only performed during initialization. A user change in
+    /// Mac Runner must be applied to macOS before the system state can be trusted;
+    /// otherwise enabling the toggle is immediately overwritten by the old state.
+    private func reconcileLoginItemSetting() {
+        let osEnabled = SMAppService.mainApp.status == .enabled
+        guard currentSettings.startOnLogin != osEnabled else { return }
+
+        currentSettings.startOnLogin = osEnabled
+        saveConfiguration()
+    }
+
+    /// Apply the current setting to the macOS login item registration.
     private func syncLoginItem() {
         let service = SMAppService.mainApp
-        let osEnabled = service.status == .enabled
-
-        // Reconcile: if OS state disagrees with config, trust the OS
-        if currentSettings.startOnLogin != osEnabled {
-            currentSettings.startOnLogin = osEnabled
-            saveConfiguration()
-        }
 
         do {
-            if currentSettings.startOnLogin {
-                if service.status != .enabled {
-                    try service.register()
-                }
-            } else {
-                if service.status == .enabled {
-                    try service.unregister()
-                }
+            switch Self.loginItemAction(
+                startOnLogin: currentSettings.startOnLogin,
+                isRegistered: service.status == .enabled
+            ) {
+            case .register:
+                try service.register()
+            case .unregister:
+                try service.unregister()
+            case .none:
+                break
             }
         } catch {
             self.error = "Failed to update login item: \(error.localizedDescription)"
+        }
+    }
+
+    nonisolated static func loginItemAction(
+        startOnLogin: Bool,
+        isRegistered: Bool
+    ) -> LoginItemAction {
+        switch (startOnLogin, isRegistered) {
+        case (true, false): return .register
+        case (false, true): return .unregister
+        default: return .none
         }
     }
 

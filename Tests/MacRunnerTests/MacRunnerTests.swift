@@ -6,6 +6,20 @@ final class MacRunnerTests: XCTestCase {
         XCTAssertTrue(true)
     }
 
+    func testEnablingLaunchAtLoginRegistersWhenSystemItemIsDisabled() {
+        XCTAssertEqual(
+            RunnerManager.loginItemAction(startOnLogin: true, isRegistered: false),
+            .register
+        )
+    }
+
+    func testDisablingLaunchAtLoginUnregistersWhenSystemItemIsEnabled() {
+        XCTAssertEqual(
+            RunnerManager.loginItemAction(startOnLogin: false, isRegistered: true),
+            .unregister
+        )
+    }
+
     func testPreferredKernelPathPrefersBundledKernel() {
         let bundleURL = URL(fileURLWithPath: "/Applications/MacRunner.app/Contents/Resources")
         let appSupportURL = URL(fileURLWithPath: "/Users/test/Library/Application Support/MacRunner")
