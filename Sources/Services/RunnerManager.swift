@@ -388,7 +388,10 @@ class RunnerManager: ObservableObject {
                 break
             }
         } catch {
-            self.error = "Failed to update login item: \(error.localizedDescription)"
+            let loginItemError = "Failed to update login item: \(error.localizedDescription)"
+            currentSettings.startOnLogin = service.status == .enabled
+            saveConfiguration()
+            self.error = loginItemError
         }
     }
 
