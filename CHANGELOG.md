@@ -1,3 +1,11 @@
+## [1.17.4](https://github.com/omniaura/mac-runner/compare/v1.17.3...v1.17.4) (2026-07-19)
+
+
+### Bug Fixes
+
+* make launch at login toggle register app ([#77](https://github.com/omniaura/mac-runner/issues/77)) ([b576f47](https://github.com/omniaura/mac-runner/commit/b576f47162116c800ea8370b81453f7bcd5eeab0))
+* refresh stale runner PATH snapshots ([0125355](https://github.com/omniaura/mac-runner/commit/0125355725d1310eb96db4bf5cd6e97720d93a24))
+
 ## [1.17.3](https://github.com/omniaura/mac-runner/compare/v1.17.2...v1.17.3) (2026-07-01)
 
 
