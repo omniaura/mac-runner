@@ -290,60 +290,58 @@ struct RunnerRow: View {
                     .help("Open current GitHub Actions run")
                 }
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) {
-                        // Isolation mode indicator
-                        if let mode = runner.isolationMode {
-                            Text("\(mode.icon) \(mode.displayName)")
-                                .font(.caption2)
-                                .lineLimit(1)
-                                .fixedSize()
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.purple.opacity(0.2))
-                                .cornerRadius(4)
-                        } else {
-                            Text("🌐 Global")
-                                .font(.caption2)
-                                .lineLimit(1)
-                                .fixedSize()
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.gray.opacity(0.2))
-                                .cornerRadius(4)
-                        }
+                FlowLayout(spacing: 4) {
+                    // Isolation mode indicator
+                    if let mode = runner.isolationMode {
+                        Text("\(mode.icon) \(mode.displayName)")
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.purple.opacity(0.2))
+                            .cornerRadius(4)
+                    } else {
+                        Text("🌐 Global")
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.gray.opacity(0.2))
+                            .cornerRadius(4)
+                    }
 
-                        // GUI access indicator
-                        if runner.enableGUI {
-                            Text("🖥️ GUI")
-                                .font(.caption2)
-                                .lineLimit(1)
-                                .fixedSize()
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.green.opacity(0.2))
-                                .cornerRadius(4)
-                        } else {
-                            Text("⚫ Headless")
-                                .font(.caption2)
-                                .lineLimit(1)
-                                .fixedSize()
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.gray.opacity(0.2))
-                                .cornerRadius(4)
-                        }
+                    // GUI access indicator
+                    if runner.enableGUI {
+                        Text("🖥️ GUI")
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.2))
+                            .cornerRadius(4)
+                    } else {
+                        Text("⚫ Headless")
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.gray.opacity(0.2))
+                            .cornerRadius(4)
+                    }
 
-                        ForEach(runner.labels, id: \.self) { label in
-                            Text(label)
-                                .font(.caption2)
-                                .lineLimit(1)
-                                .fixedSize()
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.blue.opacity(0.2))
-                                .cornerRadius(4)
-                        }
+                    ForEach(runner.labels, id: \.self) { label in
+                        Text(label)
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.2))
+                            .cornerRadius(4)
                     }
                 }
 
@@ -354,8 +352,7 @@ struct RunnerRow: View {
                         .lineLimit(2)
                 }
             }
-
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             // Inline start/stop button
             Button(action: {
@@ -667,4 +664,49 @@ struct SettingsView: View {
 #Preview {
     MenuBarView()
         .environmentObject(RunnerManager())
+}
+
+/// Lays out subviews left-to-right, wrapping onto additional lines when a row would exceed the available width.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var origin = CGPoint.zero
+        var rowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if origin.x > 0, origin.x + size.width > maxWidth {
+                origin.x = 0
+                origin.y += rowHeight + spacing
+                totalHeight += rowHeight + spacing
+                rowHeight = 0
+            }
+            origin.x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        totalHeight += rowHeight
+
+        return CGSize(width: maxWidth.isFinite ? maxWidth : origin.x, height: totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let maxWidth = bounds.width
+        var origin = CGPoint(x: bounds.minX, y: bounds.minY)
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if origin.x > bounds.minX, origin.x - bounds.minX + size.width > maxWidth {
+                origin.x = bounds.minX
+                origin.y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: origin, proposal: .unspecified)
+            origin.x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
 }
