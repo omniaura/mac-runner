@@ -4,6 +4,7 @@ struct MenuBarView: View {
     @EnvironmentObject var runnerManager: RunnerManager
     @State private var showAddRunner = false
     @State private var collapsedTargets: Set<RunnerTarget> = []
+    @State private var dismissedUpdateVersion: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -173,38 +174,50 @@ struct MenuBarView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if let update = runnerManager.availableUpdate {
-                Button(action: {
-                    Task {
-                        await runnerManager.performAvailableUpdate()
-                    }
-                }) {
-                    HStack(spacing: 10) {
-                        if runnerManager.isInstallingUpdate {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .foregroundColor(.accentColor)
+            if let update = runnerManager.availableUpdate, update.latestVersion != dismissedUpdateVersion {
+                HStack(spacing: 10) {
+                    Button(action: {
+                        Task {
+                            await runnerManager.performAvailableUpdate()
                         }
+                    }) {
+                        HStack(spacing: 10) {
+                            if runnerManager.isInstallingUpdate {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .foregroundColor(.accentColor)
+                            }
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(update.actionTitle)
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                            Text(update.detailText)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(update.actionTitle)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                Text(update.detailText)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
                         }
-
-                        Spacer()
                     }
-                    .padding(10)
-                    .background(Color.accentColor.opacity(0.1))
-                    .cornerRadius(8)
+                    .buttonStyle(.plain)
+                    .disabled(runnerManager.isInstallingUpdate)
+
+                    Spacer()
+
+                    Button(action: {
+                        dismissedUpdateVersion = update.latestVersion
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Dismiss")
                 }
-                .buttonStyle(.plain)
-                .disabled(runnerManager.isInstallingUpdate)
+                .padding(10)
+                .background(Color.accentColor.opacity(0.1))
+                .cornerRadius(8)
             }
 
             HStack {
