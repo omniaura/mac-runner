@@ -3,6 +3,7 @@ import SwiftUI
 struct MenuBarView: View {
     @EnvironmentObject var runnerManager: RunnerManager
     @State private var showAddRunner = false
+    @State private var collapsedTargets: Set<RunnerTarget> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -83,32 +84,53 @@ struct MenuBarView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(groupedRunners, id: \.target) { group in
+                    let isCollapsed = collapsedTargets.contains(group.target)
+
                     // Section header — org-level groups use a building icon to distinguish
-                    // them from repo-level groups at a glance.
-                    HStack(spacing: 4) {
-                        Image(systemName: group.target.scope == .org ? "building.2" : "folder")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        Text(group.target.displayName)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(group.runners.count)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1)
-                            .background(Color.gray.opacity(0.2))
-                            .cornerRadius(4)
+                    // them from repo-level groups at a glance. Tapping toggles the group.
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            if isCollapsed {
+                                collapsedTargets.remove(group.target)
+                            } else {
+                                collapsedTargets.insert(group.target)
+                            }
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+
+                            Image(systemName: group.target.scope == .org ? "building.2" : "folder")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Text(group.target.displayName)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(group.runners.count)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(Color.gray.opacity(0.2))
+                                .cornerRadius(4)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
                     .padding(.bottom, 2)
 
-                    ForEach(group.runners) { runner in
-                        RunnerRow(runner: runner)
-                            .environmentObject(runnerManager)
+                    if !isCollapsed {
+                        ForEach(group.runners) { runner in
+                            RunnerRow(runner: runner)
+                                .environmentObject(runnerManager)
+                        }
                     }
                 }
             }
