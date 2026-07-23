@@ -23,6 +23,7 @@ project.xcworkspace
 
 # Swift Package Manager
 .build/
+build/
 Packages/
 Package.pins
 Package.resolved
@@ -42,6 +43,9 @@ fastlane/test_output
 
 # Code Injection
 iOSInjectionProject/
+
+# VS Code
+.vscode/
 
 # macOS
 .DS_Store

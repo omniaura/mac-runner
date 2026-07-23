@@ -6,7 +6,7 @@ build:
 
 # Build and run
 run: build
-	.build/debug/MacRunner
+	.build/debug/mac-runner
 
 # Clean build artifacts
 clean:
@@ -22,7 +22,7 @@ app: release
 	@echo "Creating app bundle..."
 	@mkdir -p build/MacRunner.app/Contents/MacOS
 	@mkdir -p build/MacRunner.app/Contents/Resources
-	@cp .build/release/MacRunner build/MacRunner.app/Contents/MacOS/
+	@cp .build/apple/Products/Release/mac-runner build/MacRunner.app/Contents/MacOS/MacRunner
 	@./scripts/generate-info-plist.sh > build/MacRunner.app/Contents/Info.plist
 	@echo "App bundle created at build/MacRunner.app"
 

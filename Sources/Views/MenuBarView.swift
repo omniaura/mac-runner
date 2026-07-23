@@ -356,7 +356,11 @@ struct RunnerRow: View {
                 }
             }) {
                 Image(systemName: runner.status == .running ? "stop.fill" : "play.fill")
-                    .foregroundColor(runner.status == .running ? .red : .green)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.primary)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.primary.opacity(0.08)))
+                    .overlay(Circle().strokeBorder(Color.primary.opacity(0.2), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .help(runner.status == .running ? "Stop" : "Start")
