@@ -290,48 +290,60 @@ struct RunnerRow: View {
                     .help("Open current GitHub Actions run")
                 }
 
-                HStack(spacing: 4) {
-                    // Isolation mode indicator
-                    if let mode = runner.isolationMode {
-                        Text("\(mode.icon) \(mode.displayName)")
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.purple.opacity(0.2))
-                            .cornerRadius(4)
-                    } else {
-                        Text("🌐 Global")
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.gray.opacity(0.2))
-                            .cornerRadius(4)
-                    }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        // Isolation mode indicator
+                        if let mode = runner.isolationMode {
+                            Text("\(mode.icon) \(mode.displayName)")
+                                .font(.caption2)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.purple.opacity(0.2))
+                                .cornerRadius(4)
+                        } else {
+                            Text("🌐 Global")
+                                .font(.caption2)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.gray.opacity(0.2))
+                                .cornerRadius(4)
+                        }
 
-                    // GUI access indicator
-                    if runner.enableGUI {
-                        Text("🖥️ GUI")
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.green.opacity(0.2))
-                            .cornerRadius(4)
-                    } else {
-                        Text("⚫ Headless")
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.gray.opacity(0.2))
-                            .cornerRadius(4)
-                    }
+                        // GUI access indicator
+                        if runner.enableGUI {
+                            Text("🖥️ GUI")
+                                .font(.caption2)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.green.opacity(0.2))
+                                .cornerRadius(4)
+                        } else {
+                            Text("⚫ Headless")
+                                .font(.caption2)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.gray.opacity(0.2))
+                                .cornerRadius(4)
+                        }
 
-                    ForEach(runner.labels, id: \.self) { label in
-                        Text(label)
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.blue.opacity(0.2))
-                            .cornerRadius(4)
+                        ForEach(runner.labels, id: \.self) { label in
+                            Text(label)
+                                .font(.caption2)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.blue.opacity(0.2))
+                                .cornerRadius(4)
+                        }
                     }
                 }
 
