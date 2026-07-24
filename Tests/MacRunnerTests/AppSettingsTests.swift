@@ -16,6 +16,8 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.autoCheckForUpdates, true)
         XCTAssertEqual(settings.autoRestartEnabled, true)
         XCTAssertEqual(settings.autoRestartMaxRetries, 5)
+        XCTAssertEqual(settings.automaticDiskCleanupEnabled, false)
+        XCTAssertEqual(settings.minimumFreeDiskSpaceGB, 100)
         XCTAssertEqual(settings.openFileLimit, ResourceLimits.defaultOpenFileLimit)
     }
 
@@ -28,6 +30,8 @@ final class AppSettingsTests: XCTestCase {
             autoCheckForUpdates: false,
             autoRestartEnabled: false,
             autoRestartMaxRetries: 8,
+            automaticDiskCleanupEnabled: true,
+            minimumFreeDiskSpaceGB: 80,
             openFileLimit: 32768
         )
 
@@ -39,6 +43,8 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.autoCheckForUpdates, false)
         XCTAssertEqual(settings.autoRestartEnabled, false)
         XCTAssertEqual(settings.autoRestartMaxRetries, 8)
+        XCTAssertEqual(settings.automaticDiskCleanupEnabled, true)
+        XCTAssertEqual(settings.minimumFreeDiskSpaceGB, 80)
         XCTAssertEqual(settings.openFileLimit, 32768)
     }
 

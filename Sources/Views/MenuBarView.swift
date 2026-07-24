@@ -481,6 +481,40 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
 
+                    Toggle("Clean CI Data When Disk Space Is Low", isOn: Binding(
+                        get: { runnerManager.currentSettings.automaticDiskCleanupEnabled },
+                        set: { newValue in
+                            var settings = runnerManager.currentSettings
+                            settings.automaticDiskCleanupEnabled = newValue
+                            runnerManager.updateSettings(settings)
+                        }
+                    ))
+
+                    HStack {
+                        Text("Minimum free disk space")
+                        Spacer()
+                        Stepper(
+                            value: Binding(
+                                get: { runnerManager.currentSettings.minimumFreeDiskSpaceGB },
+                                set: { newValue in
+                                    var settings = runnerManager.currentSettings
+                                    settings.minimumFreeDiskSpaceGB = max(1, newValue)
+                                    runnerManager.updateSettings(settings)
+                                }
+                            ),
+                            in: 10...500,
+                            step: 10
+                        ) {
+                            Text("\(runnerManager.currentSettings.minimumFreeDiskSpaceGB) GB")
+                                .monospacedDigit()
+                        }
+                        .labelsHidden()
+                    }
+
+                    Text("At most once per hour, removes stopped-runner workspaces and known CI caches. Active runner data is always preserved.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
                     Toggle("Job Notifications", isOn: Binding(
                         get: { runnerManager.currentSettings.notificationsEnabled },
                         set: { newValue in
