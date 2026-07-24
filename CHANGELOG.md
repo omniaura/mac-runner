@@ -1,3 +1,10 @@
+# [1.18.0](https://github.com/omniaura/mac-runner/compare/v1.17.4...v1.18.0) (2026-07-24)
+
+
+### Features
+
+* add automatic disk cleanup ([#79](https://github.com/omniaura/mac-runner/issues/79)) ([8c961fb](https://github.com/omniaura/mac-runner/commit/8c961fb5ad67e559bd353c5905fe5cc9addb8ec4))
+
 ## [1.17.4](https://github.com/omniaura/mac-runner/compare/v1.17.3...v1.17.4) (2026-07-19)
 
 
