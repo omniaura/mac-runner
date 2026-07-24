@@ -97,6 +97,8 @@ enum CLIHandler {
             await handleStatus()
         case "setup":
             await handleSetup(args: Array(args.dropFirst()))
+        case "cleanup":
+            await handleCleanup(args: Array(args.dropFirst()))
         default:
             print("Unknown command: \(command)")
             printUsage()
@@ -124,6 +126,7 @@ enum CLIHandler {
           stop <name>       Stop a runner
           status            Show runner status summary
           setup             Set up dedicated user isolation
+          cleanup           Remove idle runner workspaces and CI caches
           help              Show this help message
           version           Show version
 
@@ -138,6 +141,10 @@ enum CLIHandler {
         SETUP OPTIONS:
           --teardown        Remove isolation (delete user, sudoers, reset config)
 
+        CLEANUP OPTIONS:
+          --dry-run         Show what would be removed
+          --workspaces-only Keep shared language, Homebrew, and Xcode caches
+
         EXAMPLES:
           mac-runner auth
           mac-runner add owner/repo --name my-runner --labels macos,arm64
@@ -151,6 +158,7 @@ enum CLIHandler {
           mac-runner remove my-runner
           sudo mac-runner setup
           sudo mac-runner setup --teardown
+          mac-runner cleanup --dry-run
         """)
     }
 
@@ -419,6 +427,30 @@ enum CLIHandler {
             await SetupWizard.runTeardown()
         } else {
             await SetupWizard.runSetup()
+        }
+    }
+
+    private static func handleCleanup(args: [String]) async {
+        let dryRun = args.contains("--dry-run")
+        let includeSharedCaches = !args.contains("--workspaces-only")
+        do {
+            let config = try ConfigService().loadConfig()
+            let report = try DiskCleanupService().cleanup(
+                runners: config.runners,
+                globalIsolationMode: config.settings.isolationMode,
+                includeSharedCaches: includeSharedCaches,
+                dryRun: dryRun
+            )
+            let size = ByteCountFormatter.string(fromByteCount: report.reclaimedBytes, countStyle: .file)
+            print("\(dryRun ? "Would reclaim" : "Reclaimed") \(size) from \(report.removedPaths.count) item(s).")
+            if !report.skippedRunnerNames.isEmpty {
+                print("Skipped active runners: \(report.skippedRunnerNames.joined(separator: ", "))")
+                if includeSharedCaches {
+                    print("Shared CI caches were preserved while runners are active.")
+                }
+            }
+        } catch {
+            print("Error: \(error.localizedDescription)")
         }
     }
 }

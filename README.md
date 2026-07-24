@@ -14,6 +14,7 @@ Simple Mac menu bar app and CLI for managing GitHub Actions self-hosted runners.
 - 📊 Monitor runner status from menu bar
 - ⚡ Native Mac app, lightweight and fast
 - 🤖 **Fully automated setup** — downloads and configures runners automatically
+- 🧹 **Disk pressure cleanup** — safely reclaim idle runner workspaces and CI caches
 
 ## Why?
 
@@ -76,9 +77,21 @@ mac-runner remove my-runner
 
 # Status summary
 mac-runner status
+
+# Preview or run cleanup (active runner data is always skipped)
+mac-runner cleanup --dry-run
+mac-runner cleanup
 ```
 
 Runners started via CLI persist in the background — they survive the terminal session. Stop and start them from any terminal or from the GUI.
+
+### Disk Cleanup
+
+GitHub Actions jobs can leave large workspaces and dependency caches behind. `mac-runner cleanup` removes the contents of stopped runners' `_work` directories plus known npm, SwiftPM, Homebrew, Go, Cargo, Gradle, and Xcode caches. If any runner is active, its workspace is skipped and shared caches are preserved.
+
+In Settings, enable **Clean CI Data When Disk Space Is Low** and choose a minimum free-space target. Mac Runner checks at most once per hour and only cleans when available space falls below that target. Automatic cleanup is off by default.
+
+Use `mac-runner cleanup --workspaces-only` to preserve all shared caches.
 
 ## CI/CD: Self-Hosted Runner with Automatic Cloud Fallback
 

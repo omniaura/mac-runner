@@ -40,6 +40,7 @@ class RunnerManager: ObservableObject {
     private let pidManager = PIDFileManager()
     private let updateChecker = UpdateChecker()
     private let updateInstaller = UpdateInstaller()
+    private let diskCleanupService = DiskCleanupService()
     #if canImport(Containerization)
     private var _containerService: Any?  // ContainerIsolationService, but untyped for availability
     #endif
@@ -69,6 +70,7 @@ class RunnerManager: ObservableObject {
     private let restartBaseDelaySeconds = 5
     private let restartMaxDelaySeconds = 60
     private var installedUpdateVersion: String?
+    private var lastAutomaticDiskCleanupCheck: Date?
 
     /// Initialize the RunnerManager and restore runtime state.
     ///
@@ -895,6 +897,34 @@ class RunnerManager: ObservableObject {
 
         if !becameIdleRunnerIDs.isEmpty {
             await restartRunnersWithStalePathSnapshots(candidateIDs: becameIdleRunnerIDs)
+        }
+
+        runAutomaticDiskCleanupIfNeeded()
+    }
+
+    private func runAutomaticDiskCleanupIfNeeded(now: Date = Date()) {
+        guard currentSettings.automaticDiskCleanupEnabled else { return }
+        if let lastCheck = lastAutomaticDiskCleanupCheck,
+           now.timeIntervalSince(lastCheck) < 3600 {
+            return
+        }
+        lastAutomaticDiskCleanupCheck = now
+
+        let threshold = Int64(currentSettings.minimumFreeDiskSpaceGB) * 1_000_000_000
+        guard let available = diskCleanupService.availableDiskBytes(), available < threshold else { return }
+
+        do {
+            let report = try diskCleanupService.cleanup(
+                runners: runners,
+                globalIsolationMode: currentSettings.isolationMode,
+                includeSharedCaches: true,
+                dryRun: false
+            )
+            if report.reclaimedBytes > 0 {
+                print("Automatic disk cleanup reclaimed \(ByteCountFormatter.string(fromByteCount: report.reclaimedBytes, countStyle: .file)).")
+            }
+        } catch {
+            print("Automatic disk cleanup failed: \(error.localizedDescription)")
         }
     }
 
