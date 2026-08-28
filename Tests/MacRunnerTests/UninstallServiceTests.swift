@@ -5,6 +5,7 @@ final class UninstallServiceTests: XCTestCase {
     private var home: URL!
     private var applications: URL!
     private var binDirectory: URL!
+    private var usersRoot: URL!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -13,7 +14,8 @@ final class UninstallServiceTests: XCTestCase {
         home = root.appendingPathComponent("home", isDirectory: true)
         applications = root.appendingPathComponent("Applications", isDirectory: true)
         binDirectory = root.appendingPathComponent("bin", isDirectory: true)
-        for url in [home, applications, binDirectory] {
+        usersRoot = root.appendingPathComponent("Users", isDirectory: true)
+        for url in [home, applications, binDirectory, usersRoot] {
             try FileManager.default.createDirectory(at: url!, withIntermediateDirectories: true)
         }
         // TMPDIR lives under /var, a symlink to /private/var. Resolve once so expected
@@ -21,6 +23,7 @@ final class UninstallServiceTests: XCTestCase {
         home = home.resolvingSymlinksInPath()
         applications = applications.resolvingSymlinksInPath()
         binDirectory = binDirectory.resolvingSymlinksInPath()
+        usersRoot = usersRoot.resolvingSymlinksInPath()
     }
 
     override func tearDownWithError() throws {
@@ -35,7 +38,8 @@ final class UninstallServiceTests: XCTestCase {
         UninstallService(
             homeDirectory: home,
             applicationsDirectory: applications,
-            cliSymlinkDirectories: [binDirectory]
+            cliSymlinkDirectories: [binDirectory],
+            usersRoot: usersRoot
         )
     }
 
@@ -112,6 +116,58 @@ final class UninstallServiceTests: XCTestCase {
 
         XCTAssertEqual(orphans.count, 1)
         XCTAssertFalse(orphans.contains { $0.path.hasSuffix("not-a-uuid") })
+    }
+
+    /// Create a workspace under a dedicated service user's home.
+    @discardableResult
+    private func makeServiceUserWorkspace(id: UUID, username: String, bytes: Int = 4096) throws -> URL {
+        let url = usersRoot
+            .appendingPathComponent(username, isDirectory: true)
+            .appendingPathComponent(".mac-runner/runners/\(id.uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: url.appendingPathComponent("_work", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try Data(repeating: 0x43, count: bytes)
+            .write(to: url.appendingPathComponent("_work/blob.bin"))
+        return url
+    }
+
+    /// Config is the only record of which service user was used, so an empty config must
+    /// still surface workspaces under the default service account.
+    func testOrphanedWorkspacesFindsDefaultServiceUserWorkspacesWithEmptyConfig() throws {
+        let orphan = UUID()
+        try makeServiceUserWorkspace(id: orphan, username: IsolationMode.defaultUsername)
+
+        let orphans = makeService().orphanedWorkspaces(runners: [], globalIsolationMode: .none)
+
+        XCTAssertEqual(orphans.count, 1)
+        XCTAssertTrue(orphans[0].path.contains(IsolationMode.defaultUsername))
+        // Service-user files are not writable by the invoking user.
+        XCTAssertTrue(orphans[0].requiresSudo)
+    }
+
+    func testOrphanedWorkspacesFindsWorkspacesForANonDefaultServiceUser() throws {
+        let orphan = UUID()
+        try makeServiceUserWorkspace(id: orphan, username: "_customrunner")
+
+        let orphans = makeService().orphanedWorkspaces(
+            runners: [],
+            globalIsolationMode: .dedicatedUser(username: "_customrunner")
+        )
+
+        XCTAssertEqual(orphans.count, 1)
+        XCTAssertTrue(orphans[0].requiresSudo)
+    }
+
+    /// Workspaces in the invoking user's own home must not be flagged as needing sudo.
+    func testLocalWorkspacesDoNotRequireSudo() throws {
+        try makeWorkspace(id: UUID())
+
+        let orphans = makeService().orphanedWorkspaces(runners: [], globalIsolationMode: .none)
+
+        XCTAssertEqual(orphans.count, 1)
+        XCTAssertFalse(orphans[0].requiresSudo)
     }
 
     // MARK: - Planning

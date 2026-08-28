@@ -90,13 +90,14 @@ class RunnerDirectory {
     /// directory instead of the real home.
     static func homeDirectory(
         isolation: IsolationMode,
-        currentHome: URL = FileManager.default.homeDirectoryForCurrentUser
+        currentHome: URL = FileManager.default.homeDirectoryForCurrentUser,
+        usersRoot: URL = URL(fileURLWithPath: "/Users")
     ) -> URL {
         switch isolation {
         case .none, .container:
             return currentHome
         case .dedicatedUser(let username):
-            return URL(fileURLWithPath: "/Users/\(username)")
+            return usersRoot.appendingPathComponent(username, isDirectory: true)
         }
     }
 
@@ -105,9 +106,10 @@ class RunnerDirectory {
     /// This is the parent of the per-runner UUID directories, i.e. `~/.mac-runner/runners`.
     static func baseDirectory(
         isolation: IsolationMode = .none,
-        currentHome: URL = FileManager.default.homeDirectoryForCurrentUser
+        currentHome: URL = FileManager.default.homeDirectoryForCurrentUser,
+        usersRoot: URL = URL(fileURLWithPath: "/Users")
     ) -> URL {
-        homeDirectory(isolation: isolation, currentHome: currentHome)
+        homeDirectory(isolation: isolation, currentHome: currentHome, usersRoot: usersRoot)
             .appendingPathComponent(".mac-runner", isDirectory: true)
             .appendingPathComponent("runners", isDirectory: true)
     }
@@ -119,9 +121,10 @@ class RunnerDirectory {
     static func directoryURL(
         for runnerId: UUID,
         isolation: IsolationMode = .none,
-        currentHome: URL = FileManager.default.homeDirectoryForCurrentUser
+        currentHome: URL = FileManager.default.homeDirectoryForCurrentUser,
+        usersRoot: URL = URL(fileURLWithPath: "/Users")
     ) -> URL {
-        baseDirectory(isolation: isolation, currentHome: currentHome)
+        baseDirectory(isolation: isolation, currentHome: currentHome, usersRoot: usersRoot)
             .appendingPathComponent(runnerId.uuidString, isDirectory: true)
     }
 

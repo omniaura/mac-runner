@@ -57,6 +57,8 @@ struct UninstallService {
     private let homeDirectory: URL
     private let applicationsDirectory: URL
     private let cliSymlinkDirectories: [URL]
+    /// Root containing service-user homes; injectable so dedicated-user teardown is testable.
+    private let usersRoot: URL
 
     init(
         fileManager: FileManager = .default,
@@ -65,12 +67,14 @@ struct UninstallService {
         cliSymlinkDirectories: [URL] = [
             URL(fileURLWithPath: "/opt/homebrew/bin"),
             URL(fileURLWithPath: "/usr/local/bin")
-        ]
+        ],
+        usersRoot: URL = URL(fileURLWithPath: "/Users")
     ) {
         self.fileManager = fileManager
         self.homeDirectory = homeDirectory
         self.applicationsDirectory = applicationsDirectory
         self.cliSymlinkDirectories = cliSymlinkDirectories
+        self.usersRoot = usersRoot
     }
 
     // MARK: - Planning
@@ -89,7 +93,7 @@ struct UninstallService {
         var seenWorkspaces = Set<String>()
         for runner in runners {
             let isolation = runner.effectiveIsolationMode(global: globalIsolationMode)
-            let url = RunnerDirectory.directoryURL(for: runner.id, isolation: isolation, currentHome: homeDirectory)
+            let url = RunnerDirectory.directoryURL(for: runner.id, isolation: isolation, currentHome: homeDirectory, usersRoot: usersRoot)
             guard fileManager.fileExists(atPath: url.path) else { continue }
             seenWorkspaces.insert(canonicalPath(url))
             items.append(
@@ -153,10 +157,22 @@ struct UninstallService {
             if case .dedicatedUser = mode, !isolations.contains(mode) { isolations.append(mode) }
         }
 
+        // Config is the only record of which service user was used, so once it is empty
+        // or gone the dedicated-user workspaces would be unreachable - the very case this
+        // function exists to catch. Probe the default service account as well, but only
+        // when its runner storage actually exists.
+        let defaultServiceUser = IsolationMode.dedicatedUser(username: IsolationMode.defaultUsername)
+        if !isolations.contains(defaultServiceUser),
+           fileManager.fileExists(
+               atPath: RunnerDirectory.baseDirectory(isolation: defaultServiceUser, currentHome: homeDirectory, usersRoot: usersRoot).path
+           ) {
+            isolations.append(defaultServiceUser)
+        }
+
         var results: [UninstallItem] = []
         var seen = Set<String>()
         for isolation in isolations {
-            let base = RunnerDirectory.baseDirectory(isolation: isolation, currentHome: homeDirectory)
+            let base = RunnerDirectory.baseDirectory(isolation: isolation, currentHome: homeDirectory, usersRoot: usersRoot)
             let children = (try? fileManager.contentsOfDirectory(
                 at: base,
                 includingPropertiesForKeys: nil,

@@ -58,14 +58,19 @@ uninstall:
 	@rm -rf ~/Library/Application\ Support/MacRunner
 	@rm -rf ~/.mac-runner
 	@rm -rf ~/Library/Caches/com.omniaura.mac-runner
-	@rm -rf ~/Library/HTTPStorages/com.omniaura.mac-runner ~/Library/HTTPStorages/mac-runner ~/Library/HTTPStorages/MacRunner
+	@rm -rf ~/Library/HTTPStorages/com.omniaura.mac-runner* ~/Library/HTTPStorages/mac-runner* ~/Library/HTTPStorages/MacRunner*
 	@rm -rf "$$HOME/Library/Saved Application State/com.omniaura.mac-runner.savedState"
 	@rm -f ~/Library/Preferences/com.omniaura.mac-runner.plist ~/Library/Preferences/mac-runner.plist
 	@rm -f ~/Library/Application\ Support/CrashReporter/MacRunner_*.plist ~/Library/Application\ Support/CrashReporter/mac-runner_*.plist
 	@rm -f ~/Library/Logs/DiagnosticReports/MacRunner-*.ips ~/Library/Logs/DiagnosticReports/mac-runner-*.ips
 	@echo "Uninstalled"
-	@echo "Note: this does not deregister runners from GitHub."
-	@echo "Run 'mac-runner uninstall' before 'make uninstall' to deregister them first."
+	@echo ""
+	@echo "Note: this is a blunt removal of the invoking user's files. It does not"
+	@echo "deregister runners from GitHub, and does not reach workspaces owned by a"
+	@echo "dedicated service user (mac-runner add --isolation user), which live under"
+	@echo "/Users/<service-user> and need sudo to delete."
+	@echo "For those, run 'mac-runner uninstall' first - it deregisters from GitHub and"
+	@echo "removes service-user workspaces, preserving anything it does not recognise."
 
 # Run tests
 test:
