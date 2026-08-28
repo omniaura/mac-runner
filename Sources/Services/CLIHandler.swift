@@ -603,9 +603,13 @@ enum CLIHandler {
     }
 
     /// Render a home-relative path as `~/...` so plan output stays readable.
-    private static func abbreviate(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        guard path.hasPrefix(home) else { return path }
+    ///
+    /// Matching must land on a path boundary: a bare prefix test rewrites
+    /// `/Users/bobby/data` as `~by/data` for home `/Users/bob`. This list is what a user
+    /// reads before confirming a destructive action, so every path shown must be exact.
+    static func abbreviate(_ path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String {
+        if path == home { return "~" }
+        guard path.hasPrefix(home + "/") else { return path }
         return "~" + path.dropFirst(home.count)
     }
 

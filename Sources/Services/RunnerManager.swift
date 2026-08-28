@@ -557,7 +557,11 @@ class RunnerManager: ObservableObject {
             do {
                 try RunnerDirectory.remove(for: id, isolation: isolation)
             } catch {
-                logRunnerEvent(for: runner, message: "Failed to delete workspace: \(error.localizedDescription)")
+                // Deliberately not logRunnerEvent: it resolves the log path with
+                // RunnerDirectory.path(for:), which recreates the directory as a side
+                // effect - here that would resurrect the workspace that just failed
+                // to delete, and re-run sudo mkdir/chown for a dedicated service user.
+                print("[Runner \(runner.name)] Failed to delete workspace: \(error.localizedDescription)")
             }
         }
 

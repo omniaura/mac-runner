@@ -129,6 +129,12 @@ configured.
 If you installed with Homebrew, remove the app itself with `brew uninstall --cask mac-runner`.
 Use `brew uninstall --zap --cask mac-runner` to remove the app and all of its data in one step.
 
+**Run `mac-runner uninstall` first if you have runners configured.** Homebrew only deletes
+local files: it cannot deregister your runners from GitHub, and it cannot reach workspaces
+owned by a dedicated service user, which live outside your home directory. Runners removed
+without deregistering stay listed in the repository's Actions settings as permanently
+offline.
+
 ## CI/CD: Self-Hosted Runner with Automatic Cloud Fallback
 
 Mac Runner uses a pattern that automatically routes CI jobs to your self-hosted Mac when it's online, and falls back to GitHub-hosted cloud runners when it's not. This means pushes to main always build, regardless of whether your Mac is on.

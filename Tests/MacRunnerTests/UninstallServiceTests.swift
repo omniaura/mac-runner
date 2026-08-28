@@ -362,6 +362,16 @@ final class UninstallServiceTests: XCTestCase {
 
     // MARK: - Safety
 
+    /// The plan is what a user reads before confirming a destructive delete, so an
+    /// abbreviated path must never misrepresent which directory is being removed.
+    func testAbbreviateOnlyMatchesOnAPathBoundary() {
+        XCTAssertEqual(CLIHandler.abbreviate("/Users/bob/.mac-runner", home: "/Users/bob"), "~/.mac-runner")
+        XCTAssertEqual(CLIHandler.abbreviate("/Users/bob", home: "/Users/bob"), "~")
+        // A sibling whose name merely starts with the home directory's name.
+        XCTAssertEqual(CLIHandler.abbreviate("/Users/bobby/data", home: "/Users/bob"), "/Users/bobby/data")
+        XCTAssertEqual(CLIHandler.abbreviate("/Applications/MacRunner.app", home: "/Users/bob"), "/Applications/MacRunner.app")
+    }
+
     func testSudoRemovalRefusesPathsOutsideRunnerStorage() {
         XCTAssertThrowsError(
             try RunnerDirectory.removeDirectoryWithSudo(at: "/Users/someone/Documents")
