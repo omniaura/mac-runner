@@ -13,8 +13,23 @@ cask "mac-runner" do
   binary "#{appdir}/MacRunner.app/Contents/MacOS/MacRunner", target: "mac-runner"
 
   zap trash: [
+    # Runner workspaces live outside Application Support because the GitHub runner
+    # scripts break on paths containing spaces. This is by far the largest artifact:
+    # each configured runner holds an extracted runner release plus its _work checkout.
+    "~/.mac-runner",
     "~/Library/Application Support/MacRunner",
+    "~/Library/Application Support/CrashReporter/MacRunner_*.plist",
+    "~/Library/Application Support/CrashReporter/mac-runner_*.plist",
+    "~/Library/Logs/DiagnosticReports/MacRunner-*.ips",
+    "~/Library/Logs/DiagnosticReports/mac-runner-*.ips",
+    "~/Library/Caches/com.omniaura.mac-runner",
+    "~/Library/HTTPStorages/com.omniaura.mac-runner",
+    "~/Library/HTTPStorages/com.omniaura.mac-runner.binarycookies",
+    "~/Library/HTTPStorages/mac-runner",
+    "~/Library/HTTPStorages/MacRunner",
     "~/Library/Preferences/com.omniaura.mac-runner.plist",
+    "~/Library/Preferences/mac-runner.plist",
+    "~/Library/Saved Application State/com.omniaura.mac-runner.savedState",
   ]
 
   caveats <<~EOS

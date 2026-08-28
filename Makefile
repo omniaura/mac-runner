@@ -56,7 +56,16 @@ uninstall:
 	@echo "Uninstalling Mac Runner..."
 	@rm -rf /Applications/MacRunner.app
 	@rm -rf ~/Library/Application\ Support/MacRunner
+	@rm -rf ~/.mac-runner
+	@rm -rf ~/Library/Caches/com.omniaura.mac-runner
+	@rm -rf ~/Library/HTTPStorages/com.omniaura.mac-runner ~/Library/HTTPStorages/mac-runner ~/Library/HTTPStorages/MacRunner
+	@rm -rf "$$HOME/Library/Saved Application State/com.omniaura.mac-runner.savedState"
+	@rm -f ~/Library/Preferences/com.omniaura.mac-runner.plist ~/Library/Preferences/mac-runner.plist
+	@rm -f ~/Library/Application\ Support/CrashReporter/MacRunner_*.plist ~/Library/Application\ Support/CrashReporter/mac-runner_*.plist
+	@rm -f ~/Library/Logs/DiagnosticReports/MacRunner-*.ips ~/Library/Logs/DiagnosticReports/mac-runner-*.ips
 	@echo "Uninstalled"
+	@echo "Note: this does not deregister runners from GitHub."
+	@echo "Run 'mac-runner uninstall' before 'make uninstall' to deregister them first."
 
 # Run tests
 test:
