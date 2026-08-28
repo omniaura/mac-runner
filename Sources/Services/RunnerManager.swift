@@ -549,6 +549,18 @@ class RunnerManager: ObservableObject {
             }
         }
 
+        // Delete the on-disk workspace. A configured runner holds the extracted
+        // runner release plus its _work checkout, which is easily >1 GB, so leaving
+        // it behind strands storage that nothing will ever reference again.
+        if let runner = runners.first(where: { $0.id == id }) {
+            let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
+            do {
+                try RunnerDirectory.remove(for: id, isolation: isolation)
+            } catch {
+                logRunnerEvent(for: runner, message: "Failed to delete workspace: \(error.localizedDescription)")
+            }
+        }
+
         // Clean up PID file
         pidManager.removePID(for: id)
         manualStopRequests.remove(id)

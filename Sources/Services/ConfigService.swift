@@ -84,22 +84,52 @@ class ConfigService {
 }
 
 class RunnerDirectory {
+    /// Home directory that backs runner storage for a given isolation mode.
+    ///
+    /// `currentHome` is injectable so teardown code can be tested against a temporary
+    /// directory instead of the real home.
+    static func homeDirectory(
+        isolation: IsolationMode,
+        currentHome: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        switch isolation {
+        case .none, .container:
+            return currentHome
+        case .dedicatedUser(let username):
+            return URL(fileURLWithPath: "/Users/\(username)")
+        }
+    }
+
+    /// Directory holding every runner workspace for a given isolation mode.
+    ///
+    /// This is the parent of the per-runner UUID directories, i.e. `~/.mac-runner/runners`.
+    static func baseDirectory(
+        isolation: IsolationMode = .none,
+        currentHome: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        homeDirectory(isolation: isolation, currentHome: currentHome)
+            .appendingPathComponent(".mac-runner", isDirectory: true)
+            .appendingPathComponent("runners", isDirectory: true)
+    }
+
+    /// Resolve a runner's workspace path *without* creating it.
+    ///
+    /// `path(for:isolation:)` creates the directory as a side effect, which makes it
+    /// unsuitable for teardown paths that only need to know where a runner lives.
+    static func directoryURL(
+        for runnerId: UUID,
+        isolation: IsolationMode = .none,
+        currentHome: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        baseDirectory(isolation: isolation, currentHome: currentHome)
+            .appendingPathComponent(runnerId.uuidString, isDirectory: true)
+    }
+
     /// Use ~/.mac-runner/runners/ instead of Application Support to avoid
     /// spaces in paths, which break GitHub Actions runner script execution.
     /// When isolation is `.dedicatedUser`, resolve under /Users/{username}/.mac-runner/runners/.
     static func path(for runnerId: UUID, isolation: IsolationMode = .none) throws -> String {
-        let baseDir: URL
-        switch isolation {
-        case .none, .container:
-            baseDir = FileManager.default.homeDirectoryForCurrentUser
-        case .dedicatedUser(let username):
-            baseDir = URL(fileURLWithPath: "/Users/\(username)")
-        }
-
-        let runnerDir = baseDir
-            .appendingPathComponent(".mac-runner", isDirectory: true)
-            .appendingPathComponent("runners", isDirectory: true)
-            .appendingPathComponent(runnerId.uuidString, isDirectory: true)
+        let runnerDir = directoryURL(for: runnerId, isolation: isolation)
 
         switch isolation {
         case .none, .container:
@@ -112,6 +142,42 @@ class RunnerDirectory {
         }
 
         return runnerDir.path
+    }
+
+    /// Delete a runner's workspace directory.
+    ///
+    /// Workspaces owned by a dedicated service user are not writable by the invoking
+    /// user, so those are removed via the same passwordless sudo entry used to create them.
+    static func remove(for runnerId: UUID, isolation: IsolationMode = .none) throws {
+        let directory = directoryURL(for: runnerId, isolation: isolation)
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+
+        switch isolation {
+        case .none, .container:
+            try FileManager.default.removeItem(at: directory)
+        case .dedicatedUser:
+            try removeDirectoryWithSudo(at: directory.path)
+        }
+    }
+
+    /// Remove a directory owned by the service user via sudo.
+    static func removeDirectoryWithSudo(at path: String) throws {
+        // Guard against ever handing `rm -rf` a path outside Mac Runner storage.
+        guard path.contains("/.mac-runner") else {
+            throw RunnerDirectoryError.refusedUnsafeRemoval(path)
+        }
+
+        let remove = Process()
+        remove.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+        remove.arguments = ["-n", "rm", "-rf", path]
+        remove.standardOutput = FileHandle.nullDevice
+        remove.standardError = FileHandle.nullDevice
+        try remove.run()
+        remove.waitUntilExit()
+
+        guard remove.terminationStatus == 0 else {
+            throw RunnerDirectoryError.sudoRemovalFailed(path)
+        }
     }
 
     /// Create a directory owned by the service user via sudo.
@@ -133,5 +199,19 @@ class RunnerDirectory {
         chown.standardError = FileHandle.nullDevice
         try chown.run()
         chown.waitUntilExit()
+    }
+}
+
+enum RunnerDirectoryError: LocalizedError {
+    case refusedUnsafeRemoval(String)
+    case sudoRemovalFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .refusedUnsafeRemoval(let path):
+            return "Refusing to remove '\(path)': not a Mac Runner workspace directory."
+        case .sudoRemovalFailed(let path):
+            return "Failed to remove '\(path)'. Run 'mac-runner setup' to restore sudo access, or delete it manually."
+        }
     }
 }
