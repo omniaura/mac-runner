@@ -72,7 +72,7 @@ mac-runner list
 mac-runner start my-runner
 mac-runner stop my-runner
 
-# Remove (also deletes from GitHub)
+# Remove (deregisters from GitHub and deletes the runner's workspace)
 mac-runner remove my-runner
 
 # Status summary
@@ -81,6 +81,10 @@ mac-runner status
 # Preview or run cleanup (active runner data is always skipped)
 mac-runner cleanup --dry-run
 mac-runner cleanup
+
+# Remove every runner and every file Mac Runner created
+mac-runner uninstall --dry-run
+mac-runner uninstall
 ```
 
 Runners started via CLI persist in the background — they survive the terminal session. Stop and start them from any terminal or from the GUI.
@@ -92,6 +96,44 @@ GitHub Actions jobs can leave large workspaces and dependency caches behind. `ma
 In Settings, enable **Clean CI Data When Disk Space Is Low** and choose a minimum free-space target. Mac Runner checks at most once per hour and only cleans when available space falls below that target. Automatic cleanup is off by default.
 
 Use `mac-runner cleanup --workspaces-only` to preserve all shared caches.
+
+### Uninstalling
+
+`mac-runner uninstall` tears down a Mac Runner installation completely. It stops running
+runners, deregisters them from GitHub, and deletes every location Mac Runner writes to:
+
+| Location | Contents |
+| --- | --- |
+| `~/.mac-runner` | Runner workspaces — the extracted runner release and its `_work` checkout, typically >1 GB each |
+| `~/Library/Application Support/MacRunner` | `config.json`, PID files, container kernel |
+| `~/Library/Preferences/{com.omniaura.mac-runner,mac-runner}.plist` | App and CLI preferences |
+| `~/Library/HTTPStorages/*`, `~/Library/Caches/*` | Cached update checks |
+| `~/Library/Application Support/CrashReporter`, `~/Library/Logs/DiagnosticReports` | Crash and diagnostic reports |
+
+Deregistering first matters: deleting a runner's credentials without telling GitHub leaves
+it listed as a permanently offline runner in the repository's Actions settings.
+
+```bash
+mac-runner uninstall --dry-run      # show exactly what would be deleted, and how much space
+mac-runner uninstall                # prompts before deleting
+mac-runner uninstall --yes          # skip the prompt
+mac-runner uninstall --include-app  # also delete MacRunner.app and the mac-runner symlink
+mac-runner uninstall --keep-runners # delete local files but leave GitHub registrations
+```
+
+Uninstall also removes **orphaned workspaces** — directories left on disk by earlier
+versions that deleted a runner from `config.json` without deleting its files. If you have
+been using Mac Runner for a while, `--dry-run` is worth running even if you have no runners
+configured.
+
+If you installed with Homebrew, remove the app itself with `brew uninstall --cask mac-runner`.
+Use `brew uninstall --zap --cask mac-runner` to remove the app and all of its data in one step.
+
+**Run `mac-runner uninstall` first if you have runners configured.** Homebrew only deletes
+local files: it cannot deregister your runners from GitHub, and it cannot reach workspaces
+owned by a dedicated service user, which live outside your home directory. Runners removed
+without deregistering stay listed in the repository's Actions settings as permanently
+offline.
 
 ## CI/CD: Self-Hosted Runner with Automatic Cloud Fallback
 

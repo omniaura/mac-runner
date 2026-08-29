@@ -97,6 +97,8 @@ enum CLIHandler {
             await handleStatus()
         case "setup":
             await handleSetup(args: Array(args.dropFirst()))
+        case "uninstall":
+            await handleUninstall(args: Array(args.dropFirst()))
         case "cleanup":
             await handleCleanup(args: Array(args.dropFirst()))
         default:
@@ -127,6 +129,7 @@ enum CLIHandler {
           status            Show runner status summary
           setup             Set up dedicated user isolation
           cleanup           Remove idle runner workspaces and CI caches
+          uninstall         Remove all runners and every file Mac Runner created
           help              Show this help message
           version           Show version
 
@@ -144,6 +147,12 @@ enum CLIHandler {
         CLEANUP OPTIONS:
           --dry-run         Show what would be removed
           --workspaces-only Keep shared language, Homebrew, and Xcode caches
+
+        UNINSTALL OPTIONS:
+          --dry-run         Show what would be removed without deleting anything
+          --yes, -y         Skip the confirmation prompt
+          --include-app     Also delete MacRunner.app and the mac-runner symlink
+          --keep-runners    Leave runners registered on GitHub (delete local files only)
 
         EXAMPLES:
           mac-runner auth
@@ -428,6 +437,180 @@ enum CLIHandler {
         } else {
             await SetupWizard.runSetup()
         }
+    }
+
+    @MainActor
+    private static func handleUninstall(args: [String]) async {
+        let dryRun = args.contains("--dry-run")
+        let assumeYes = args.contains("--yes") || args.contains("-y")
+        let includeApplication = args.contains("--include-app")
+        let keepRunners = args.contains("--keep-runners")
+
+        let config: RunnerConfig
+        do {
+            config = try ConfigService().loadConfig()
+        } catch {
+            print("Error: failed to load config: \(error.localizedDescription)")
+            return
+        }
+
+        let service = UninstallService()
+        let plan = service.plan(
+            runners: config.runners,
+            globalIsolationMode: config.settings.isolationMode,
+            includeApplication: includeApplication
+        )
+
+        guard !plan.isEmpty else {
+            print("Nothing to uninstall - no Mac Runner files found.")
+            return
+        }
+
+        printPlan(plan, keepRunners: keepRunners)
+
+        if dryRun {
+            let size = ByteCountFormatter.string(fromByteCount: plan.totalBytes, countStyle: .file)
+            print("")
+            print("Dry run: nothing was deleted. \(plan.items.count) item(s), \(size) would be freed.")
+            return
+        }
+
+        if !assumeYes {
+            print("")
+            print("This cannot be undone. Continue? [y/N] ", terminator: "")
+            guard let response = readLine()?.trimmingCharacters(in: .whitespaces).lowercased(),
+                  response == "y" || response == "yes" else {
+                print("Uninstall cancelled.")
+                return
+            }
+        }
+
+        // Stop anything still running so its workspace is not deleted mid-job.
+        //
+        // RunnerManager is built only when there is something to stop: constructing it
+        // pulls in UNUserNotificationCenter, which traps when the CLI runs outside an app
+        // bundle - the exact state a user is in when uninstalling after deleting the app.
+        let runningRunners = config.runners.filter { $0.status == .running }
+        if !runningRunners.isEmpty {
+            let manager = RunnerManager()
+            for runner in runningRunners {
+                print("Stopping '\(runner.name)'...")
+                try? await manager.stopRunner(runner.id)
+            }
+        }
+
+        // Deregister from GitHub before the credentials are deleted, otherwise the
+        // runners linger in repository settings as permanently offline entries.
+        var deregistered: [String] = []
+        var failedDeregistrations: [String] = []
+        if !keepRunners {
+            for runner in plan.runnersToDeregister {
+                guard let ghId = runner.githubRunnerId else { continue }
+                do {
+                    try await GHCLIService.shared.deleteRunner(target: runner.target, githubRunnerId: ghId)
+                    deregistered.append(runner.name)
+                } catch {
+                    failedDeregistrations.append("\(runner.name) (\(runner.repo))")
+                }
+            }
+        }
+
+        let report = service.execute(
+            plan: plan,
+            dryRun: false,
+            deregistered: deregistered,
+            failedDeregistrations: failedDeregistrations
+        )
+
+        printReport(report, service: service, includedApplication: includeApplication, keepRunners: keepRunners)
+    }
+
+    private static func printPlan(_ plan: UninstallPlan, keepRunners: Bool) {
+        print("Mac Runner uninstall")
+        print("")
+
+        if !plan.activeRunnerNames.isEmpty {
+            print("Running runners (will be stopped): \(plan.activeRunnerNames.joined(separator: ", "))")
+            print("")
+        }
+
+        if !keepRunners && !plan.runnersToDeregister.isEmpty {
+            print("Will deregister from GitHub:")
+            for runner in plan.runnersToDeregister {
+                print("  \(runner.name)  (\(runner.repo))")
+            }
+            print("")
+        }
+
+        print("Will delete:")
+        let pathWidth = min(plan.items.map(\.path.count).max() ?? 0, 72)
+        for item in plan.items {
+            let size = ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file)
+            let path = abbreviate(item.path)
+            let padded = path.padding(toLength: max(pathWidth, path.count), withPad: " ", startingAt: 0)
+            print("  \(padded)  \(size.padding(toLength: 10, withPad: " ", startingAt: 0))  \(item.category.rawValue)")
+        }
+
+        let total = ByteCountFormatter.string(fromByteCount: plan.totalBytes, countStyle: .file)
+        print("")
+        print("Total: \(plan.items.count) item(s), \(total)")
+    }
+
+    private static func printReport(
+        _ report: UninstallReport,
+        service: UninstallService,
+        includedApplication: Bool,
+        keepRunners: Bool
+    ) {
+        let size = ByteCountFormatter.string(fromByteCount: report.reclaimedBytes, countStyle: .file)
+        print("")
+        print("Removed \(report.removedPaths.count) item(s), freed \(size).")
+
+        if !report.deregisteredRunners.isEmpty {
+            print("Deregistered from GitHub: \(report.deregisteredRunners.joined(separator: ", "))")
+        }
+
+        if !report.failedDeregistrations.isEmpty {
+            print("")
+            print("Could not deregister: \(report.failedDeregistrations.joined(separator: ", "))")
+            print("These remain listed as offline runners. Remove them from the repository's")
+            print("Settings > Actions > Runners page.")
+        }
+
+        if !report.failedPaths.isEmpty {
+            print("")
+            print("Could not remove:")
+            for path in report.failedPaths {
+                print("  \(abbreviate(path))")
+            }
+        }
+
+        if keepRunners {
+            print("")
+            print("Runners were left registered on GitHub (--keep-runners).")
+        }
+
+        if !includedApplication {
+            print("")
+            if service.isHomebrewManaged() {
+                print("Local data is gone. To remove the app itself, run:")
+                print("  brew uninstall --cask mac-runner")
+            } else {
+                print("Local data is gone. To remove the app itself, re-run with --include-app")
+                print("or delete /Applications/MacRunner.app manually.")
+            }
+        }
+    }
+
+    /// Render a home-relative path as `~/...` so plan output stays readable.
+    ///
+    /// Matching must land on a path boundary: a bare prefix test rewrites
+    /// `/Users/bobby/data` as `~by/data` for home `/Users/bob`. This list is what a user
+    /// reads before confirming a destructive action, so every path shown must be exact.
+    static func abbreviate(_ path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String {
+        if path == home { return "~" }
+        guard path.hasPrefix(home + "/") else { return path }
+        return "~" + path.dropFirst(home.count)
     }
 
     private static func handleCleanup(args: [String]) async {
