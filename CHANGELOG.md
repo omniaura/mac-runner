@@ -1,3 +1,11 @@
+# [1.19.0](https://github.com/omniaura/mac-runner/compare/v1.18.0...v1.19.0) (2026-08-29)
+
+
+### Features
+
+* complete uninstall — stop stranding runner workspaces on disk ([#80](https://github.com/omniaura/mac-runner/issues/80)) ([e4ed6af](https://github.com/omniaura/mac-runner/commit/e4ed6af2db47a61ef47e23b8d353060cd9c3eaeb))
+* redesign runner list controls and add collapsible groups ([#78](https://github.com/omniaura/mac-runner/issues/78)) ([45240c4](https://github.com/omniaura/mac-runner/commit/45240c435104f9648d3571198ef471a533479033))
+
 # [1.18.0](https://github.com/omniaura/mac-runner/compare/v1.17.4...v1.18.0) (2026-07-24)
 
 
