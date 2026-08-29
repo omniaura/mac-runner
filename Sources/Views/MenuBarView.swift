@@ -3,6 +3,8 @@ import SwiftUI
 struct MenuBarView: View {
     @EnvironmentObject var runnerManager: RunnerManager
     @State private var showAddRunner = false
+    @State private var collapsedTargets: Set<RunnerTarget> = []
+    @State private var dismissedUpdateVersion: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -83,32 +85,53 @@ struct MenuBarView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(groupedRunners, id: \.target) { group in
+                    let isCollapsed = collapsedTargets.contains(group.target)
+
                     // Section header — org-level groups use a building icon to distinguish
-                    // them from repo-level groups at a glance.
-                    HStack(spacing: 4) {
-                        Image(systemName: group.target.scope == .org ? "building.2" : "folder")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        Text(group.target.displayName)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(group.runners.count)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1)
-                            .background(Color.gray.opacity(0.2))
-                            .cornerRadius(4)
+                    // them from repo-level groups at a glance. Tapping toggles the group.
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            if isCollapsed {
+                                collapsedTargets.remove(group.target)
+                            } else {
+                                collapsedTargets.insert(group.target)
+                            }
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+
+                            Image(systemName: group.target.scope == .org ? "building.2" : "folder")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Text(group.target.displayName)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(group.runners.count)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(Color.gray.opacity(0.2))
+                                .cornerRadius(4)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
                     .padding(.bottom, 2)
 
-                    ForEach(group.runners) { runner in
-                        RunnerRow(runner: runner)
-                            .environmentObject(runnerManager)
+                    if !isCollapsed {
+                        ForEach(group.runners) { runner in
+                            RunnerRow(runner: runner)
+                                .environmentObject(runnerManager)
+                        }
                     }
                 }
             }
@@ -151,38 +174,50 @@ struct MenuBarView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if let update = runnerManager.availableUpdate {
-                Button(action: {
-                    Task {
-                        await runnerManager.performAvailableUpdate()
-                    }
-                }) {
-                    HStack(spacing: 10) {
-                        if runnerManager.isInstallingUpdate {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .foregroundColor(.accentColor)
+            if let update = runnerManager.availableUpdate, update.latestVersion != dismissedUpdateVersion {
+                HStack(spacing: 10) {
+                    Button(action: {
+                        Task {
+                            await runnerManager.performAvailableUpdate()
                         }
+                    }) {
+                        HStack(spacing: 10) {
+                            if runnerManager.isInstallingUpdate {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .foregroundColor(.accentColor)
+                            }
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(update.actionTitle)
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                            Text(update.detailText)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(update.actionTitle)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                Text(update.detailText)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
                         }
-
-                        Spacer()
                     }
-                    .padding(10)
-                    .background(Color.accentColor.opacity(0.1))
-                    .cornerRadius(8)
+                    .buttonStyle(.plain)
+                    .disabled(runnerManager.isInstallingUpdate)
+
+                    Spacer()
+
+                    Button(action: {
+                        dismissedUpdateVersion = update.latestVersion
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Dismiss")
                 }
-                .buttonStyle(.plain)
-                .disabled(runnerManager.isInstallingUpdate)
+                .padding(10)
+                .background(Color.accentColor.opacity(0.1))
+                .cornerRadius(8)
             }
 
             HStack {
@@ -290,11 +325,13 @@ struct RunnerRow: View {
                     .help("Open current GitHub Actions run")
                 }
 
-                HStack(spacing: 4) {
+                FlowLayout(spacing: 4) {
                     // Isolation mode indicator
                     if let mode = runner.isolationMode {
                         Text("\(mode.icon) \(mode.displayName)")
                             .font(.caption2)
+                            .lineLimit(1)
+                            .fixedSize()
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.purple.opacity(0.2))
@@ -302,6 +339,8 @@ struct RunnerRow: View {
                     } else {
                         Text("🌐 Global")
                             .font(.caption2)
+                            .lineLimit(1)
+                            .fixedSize()
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.gray.opacity(0.2))
@@ -312,6 +351,8 @@ struct RunnerRow: View {
                     if runner.enableGUI {
                         Text("🖥️ GUI")
                             .font(.caption2)
+                            .lineLimit(1)
+                            .fixedSize()
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.green.opacity(0.2))
@@ -319,6 +360,8 @@ struct RunnerRow: View {
                     } else {
                         Text("⚫ Headless")
                             .font(.caption2)
+                            .lineLimit(1)
+                            .fixedSize()
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.gray.opacity(0.2))
@@ -328,6 +371,8 @@ struct RunnerRow: View {
                     ForEach(runner.labels, id: \.self) { label in
                         Text(label)
                             .font(.caption2)
+                            .lineLimit(1)
+                            .fixedSize()
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.blue.opacity(0.2))
@@ -342,8 +387,7 @@ struct RunnerRow: View {
                         .lineLimit(2)
                 }
             }
-
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             // Inline start/stop button
             Button(action: {
@@ -356,7 +400,11 @@ struct RunnerRow: View {
                 }
             }) {
                 Image(systemName: runner.status == .running ? "stop.fill" : "play.fill")
-                    .foregroundColor(runner.status == .running ? .red : .green)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.primary)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.primary.opacity(0.08)))
+                    .overlay(Circle().strokeBorder(Color.primary.opacity(0.2), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .help(runner.status == .running ? "Stop" : "Start")
@@ -685,4 +733,49 @@ struct SettingsView: View {
 #Preview {
     MenuBarView()
         .environmentObject(RunnerManager())
+}
+
+/// Lays out subviews left-to-right, wrapping onto additional lines when a row would exceed the available width.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var origin = CGPoint.zero
+        var rowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if origin.x > 0, origin.x + size.width > maxWidth {
+                origin.x = 0
+                origin.y += rowHeight + spacing
+                totalHeight += rowHeight + spacing
+                rowHeight = 0
+            }
+            origin.x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        totalHeight += rowHeight
+
+        return CGSize(width: maxWidth.isFinite ? maxWidth : origin.x, height: totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let maxWidth = bounds.width
+        var origin = CGPoint(x: bounds.minX, y: bounds.minY)
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if origin.x > bounds.minX, origin.x - bounds.minX + size.width > maxWidth {
+                origin.x = bounds.minX
+                origin.y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: origin, proposal: .unspecified)
+            origin.x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
 }
