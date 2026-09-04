@@ -559,7 +559,21 @@ struct SettingsView: View {
                         .labelsHidden()
                     }
 
-                    Text("At most once per hour, removes stopped-runner workspaces and known CI caches. Active runner data is always preserved.")
+                    Toggle("Clean Completed Job Workspaces Under Pressure", isOn: Binding(
+                        get: { runnerManager.currentSettings.postJobWorkspaceCleanupEnabled },
+                        set: { newValue in
+                            var settings = runnerManager.currentSettings
+                            settings.postJobWorkspaceCleanupEnabled = newValue
+                            runnerManager.updateSettings(settings)
+                        }
+                    ))
+                    .disabled(!runnerManager.currentSettings.automaticDiskCleanupEnabled)
+
+                    Text("After all workflow steps finish, removes only that job's checkout when free space is below the target. Restart runners after changing this setting to apply the hook.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Text("At most once per hour, also removes stopped-runner workspaces and known CI caches. Active jobs and shared caches in use are always preserved.")
                         .font(.caption)
                         .foregroundColor(.secondary)
 

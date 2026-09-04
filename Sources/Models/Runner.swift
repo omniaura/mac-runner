@@ -250,6 +250,7 @@ struct AppSettings: Codable, Sendable {
     var autoRestartEnabled: Bool
     var autoRestartMaxRetries: Int
     var automaticDiskCleanupEnabled: Bool
+    var postJobWorkspaceCleanupEnabled: Bool
     var minimumFreeDiskSpaceGB: Int
     var openFileLimit: Int
 
@@ -264,6 +265,7 @@ struct AppSettings: Codable, Sendable {
         autoRestartEnabled: true,
         autoRestartMaxRetries: 5,
         automaticDiskCleanupEnabled: false,
+        postJobWorkspaceCleanupEnabled: true,
         minimumFreeDiskSpaceGB: 100,
         openFileLimit: ResourceLimits.defaultOpenFileLimit
     )
@@ -279,6 +281,7 @@ struct AppSettings: Codable, Sendable {
         autoRestartEnabled: Bool = true,
         autoRestartMaxRetries: Int = 5,
         automaticDiskCleanupEnabled: Bool = false,
+        postJobWorkspaceCleanupEnabled: Bool = true,
         minimumFreeDiskSpaceGB: Int = 100,
         openFileLimit: Int = ResourceLimits.defaultOpenFileLimit
     ) {
@@ -292,6 +295,7 @@ struct AppSettings: Codable, Sendable {
         self.autoRestartEnabled = autoRestartEnabled
         self.autoRestartMaxRetries = max(1, autoRestartMaxRetries)
         self.automaticDiskCleanupEnabled = automaticDiskCleanupEnabled
+        self.postJobWorkspaceCleanupEnabled = postJobWorkspaceCleanupEnabled
         self.minimumFreeDiskSpaceGB = max(1, minimumFreeDiskSpaceGB)
         self.openFileLimit = ResourceLimits.normalizedOpenFileLimit(openFileLimit) ?? ResourceLimits.defaultOpenFileLimit
     }
@@ -310,6 +314,7 @@ struct AppSettings: Codable, Sendable {
         autoRestartEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoRestartEnabled) ?? true
         autoRestartMaxRetries = max(1, try container.decodeIfPresent(Int.self, forKey: .autoRestartMaxRetries) ?? 5)
         automaticDiskCleanupEnabled = try container.decodeIfPresent(Bool.self, forKey: .automaticDiskCleanupEnabled) ?? false
+        postJobWorkspaceCleanupEnabled = try container.decodeIfPresent(Bool.self, forKey: .postJobWorkspaceCleanupEnabled) ?? true
         minimumFreeDiskSpaceGB = max(1, try container.decodeIfPresent(Int.self, forKey: .minimumFreeDiskSpaceGB) ?? 100)
         openFileLimit = ResourceLimits.normalizedOpenFileLimit(
             try container.decodeIfPresent(Int.self, forKey: .openFileLimit)
