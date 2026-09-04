@@ -225,6 +225,7 @@ class RunnerManager: ObservableObject {
             availableUpdate = nil
         }
         saveConfiguration()
+        synchronizePostJobWorkspaceCleanupHooks()
         refreshUpdateStatusMessage()
         if loginChanged {
             syncLoginItem()
@@ -622,6 +623,11 @@ class RunnerManager: ObservableObject {
             )
         }
 
+        try synchronizePostJobWorkspaceCleanupHook(
+            runnerDirectory: runnerDir,
+            isolation: isolation
+        )
+
         // Launch runner as a background process that survives the parent (CLI) exiting.
         let logFile = "\(runnerDir)/runner.log"
 
@@ -942,6 +948,37 @@ class RunnerManager: ObservableObject {
         } catch {
             print("Automatic disk cleanup failed: \(error.localizedDescription)")
         }
+    }
+
+    private func synchronizePostJobWorkspaceCleanupHooks() {
+        for runner in runners {
+            let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
+            let runnerDirectory = RunnerDirectory.directoryURL(for: runner.id, isolation: isolation)
+            guard FileManager.default.fileExists(atPath: runnerDirectory.path) else { continue }
+
+            do {
+                try synchronizePostJobWorkspaceCleanupHook(
+                    runnerDirectory: runnerDirectory.path,
+                    isolation: isolation
+                )
+            } catch {
+                self.error = "Failed to configure post-job cleanup for \(runner.name): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func synchronizePostJobWorkspaceCleanupHook(
+        runnerDirectory: String,
+        isolation: IsolationMode
+    ) throws {
+        guard isolation != .container else { return }
+
+        try PostJobWorkspaceCleanupHook.synchronize(
+            runnerDirectory: URL(fileURLWithPath: runnerDirectory),
+            isolation: isolation,
+            enabled: currentSettings.automaticDiskCleanupEnabled && currentSettings.postJobWorkspaceCleanupEnabled,
+            minimumFreeDiskSpaceGB: currentSettings.minimumFreeDiskSpaceGB
+        )
     }
 
     // MARK: - Duplicate Runner

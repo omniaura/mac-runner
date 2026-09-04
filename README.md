@@ -95,6 +95,8 @@ GitHub Actions jobs can leave large workspaces and dependency caches behind. `ma
 
 In Settings, enable **Clean CI Data When Disk Space Is Low** and choose a minimum free-space target. Mac Runner checks at most once per hour and only cleans when available space falls below that target. Automatic cleanup is off by default.
 
+For always-on fleets, enable **Clean Completed Job Workspaces Under Pressure**. Mac Runner installs GitHub's post-job hook outside the runner application directory; after every workflow finishes, the hook removes only that job's checkout when the free-space target is still unmet. It never runs while workflow steps are active and exits successfully if cleanup cannot proceed. Restart existing runners after changing the setting so they load the hook.
+
 Use `mac-runner cleanup --workspaces-only` to preserve all shared caches.
 
 ### Uninstalling

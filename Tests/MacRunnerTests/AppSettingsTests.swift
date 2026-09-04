@@ -17,6 +17,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.autoRestartEnabled, true)
         XCTAssertEqual(settings.autoRestartMaxRetries, 5)
         XCTAssertEqual(settings.automaticDiskCleanupEnabled, false)
+        XCTAssertEqual(settings.postJobWorkspaceCleanupEnabled, true)
         XCTAssertEqual(settings.minimumFreeDiskSpaceGB, 100)
         XCTAssertEqual(settings.openFileLimit, ResourceLimits.defaultOpenFileLimit)
     }
@@ -31,6 +32,7 @@ final class AppSettingsTests: XCTestCase {
             autoRestartEnabled: false,
             autoRestartMaxRetries: 8,
             automaticDiskCleanupEnabled: true,
+            postJobWorkspaceCleanupEnabled: false,
             minimumFreeDiskSpaceGB: 80,
             openFileLimit: 32768
         )
@@ -44,6 +46,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.autoRestartEnabled, false)
         XCTAssertEqual(settings.autoRestartMaxRetries, 8)
         XCTAssertEqual(settings.automaticDiskCleanupEnabled, true)
+        XCTAssertEqual(settings.postJobWorkspaceCleanupEnabled, false)
         XCTAssertEqual(settings.minimumFreeDiskSpaceGB, 80)
         XCTAssertEqual(settings.openFileLimit, 32768)
     }
@@ -72,6 +75,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(json?["autoCheckForUpdates"] as? Bool, false)
         XCTAssertEqual(json?["autoRestartEnabled"] as? Bool, false)
         XCTAssertEqual(json?["autoRestartMaxRetries"] as? Int, 12)
+        XCTAssertEqual(json?["postJobWorkspaceCleanupEnabled"] as? Bool, true)
         XCTAssertEqual(json?["openFileLimit"] as? Int, 131072)
 
         let isolationModeData = json?["isolationMode"] as? [String: Any]
@@ -117,6 +121,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.autoCheckForUpdates, false)
         XCTAssertEqual(settings.autoRestartEnabled, true)
         XCTAssertEqual(settings.autoRestartMaxRetries, 9)
+        XCTAssertEqual(settings.postJobWorkspaceCleanupEnabled, true)
         XCTAssertEqual(settings.openFileLimit, 32768)
     }
 
@@ -139,6 +144,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.autoCheckForUpdates, true)
         XCTAssertEqual(settings.autoRestartEnabled, true)
         XCTAssertEqual(settings.autoRestartMaxRetries, 5)
+        XCTAssertEqual(settings.postJobWorkspaceCleanupEnabled, true)
         XCTAssertEqual(settings.openFileLimit, ResourceLimits.defaultOpenFileLimit)
     }
 
@@ -158,6 +164,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.autoCheckForUpdates, true)
         XCTAssertEqual(settings.autoRestartEnabled, true)
         XCTAssertEqual(settings.autoRestartMaxRetries, 5)
+        XCTAssertEqual(settings.postJobWorkspaceCleanupEnabled, true)
         XCTAssertEqual(settings.openFileLimit, ResourceLimits.defaultOpenFileLimit)
     }
 
