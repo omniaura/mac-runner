@@ -80,20 +80,36 @@ enum ContainerRunnerScript {
       if ! command -v Xvfb >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
         log "Installing Xvfb for this runner's virtual display"
         $SUDO apt-get update -qq || log "apt-get update failed; trying the install anyway"
-        DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq --no-install-recommends xvfb xauth >/dev/null \
+        DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq --no-install-recommends xvfb xauth x11-utils >/dev/null \
           || log "Could not install Xvfb"
       fi
       if ! command -v Xvfb >/dev/null 2>&1; then
         log "ERROR: GUI access needs Xvfb, and this image has neither Xvfb nor apt-get. Use an image with Xvfb, or turn off GUI access."
         exit 1
       fi
-      x11_socket="${MR_X11_DIR:-/tmp/.X11-unix}/X${MR_DISPLAY#:}"
+      display_number="${MR_DISPLAY#:}"
+      x11_socket="${MR_X11_DIR:-/tmp/.X11-unix}/X$display_number"
+      # A leftover socket or lock would look like a running display.
+      rm -f "$x11_socket" "/tmp/.X$display_number-lock" 2>/dev/null \
+        || $SUDO rm -f "$x11_socket" "/tmp/.X$display_number-lock" 2>/dev/null || true
       Xvfb "$MR_DISPLAY" -screen 0 "${MR_DISPLAY_SIZE:-1920x1080x24}" -nolisten tcp >/dev/null 2>&1 &
+      xvfb_pid=$!
+      # Ready means: Xvfb is still running, its socket exists, and (when
+      # xdpyinfo is available) a client can actually connect.
+      display_ready=""
       for _ in $(seq 1 100); do
-        [ -S "$x11_socket" ] && break
+        kill -0 "$xvfb_pid" 2>/dev/null || break
+        if [ -S "$x11_socket" ]; then
+          if ! command -v xdpyinfo >/dev/null 2>&1 || DISPLAY="$MR_DISPLAY" xdpyinfo >/dev/null 2>&1; then
+            display_ready=1
+            break
+          fi
+        fi
         sleep 0.1
       done
-      if [ ! -S "$x11_socket" ]; then
+      sleep 0.3
+      kill -0 "$xvfb_pid" 2>/dev/null || display_ready=""
+      if [ -z "$display_ready" ]; then
         log "ERROR: the virtual display $MR_DISPLAY did not start. Not starting the runner so GUI jobs don't run without a display."
         exit 1
       fi

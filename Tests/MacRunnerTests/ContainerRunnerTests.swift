@@ -177,7 +177,7 @@ final class ContainerRunnerTests: XCTestCase {
     }
 
     /// Runs the startup script's GUI path with a stub Xvfb in a scratch runner.
-    private func runGUIStartup(xvfbStub: String?) throws -> (status: Int32, output: String, registered: Bool) {
+    private func runGUIStartup(xvfbStub: String?, xdpyinfoStub: String? = nil) throws -> (status: Int32, output: String, registered: Bool) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ctr-gui-\(UUID().uuidString)", isDirectory: true)
         // Unix socket paths are limited to ~104 bytes; keep this one short.
         let x11 = "/tmp/mrx-\(UUID().uuidString.prefix(8))"
@@ -198,6 +198,10 @@ final class ContainerRunnerTests: XCTestCase {
         if let xvfbStub {
             try xvfbStub.write(to: bin.appendingPathComponent("Xvfb"), atomically: true, encoding: .utf8)
             executables.append(bin.appendingPathComponent("Xvfb"))
+        }
+        if let xdpyinfoStub {
+            try xdpyinfoStub.write(to: bin.appendingPathComponent("xdpyinfo"), atomically: true, encoding: .utf8)
+            executables.append(bin.appendingPathComponent("xdpyinfo"))
         }
         for file in executables {
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
@@ -244,5 +248,25 @@ final class ContainerRunnerTests: XCTestCase {
         XCTAssertNotEqual(result.status, 0)
         XCTAssertTrue(result.output.contains("neither Xvfb nor apt-get"), result.output)
         XCTAssertFalse(result.registered)
+    }
+
+    private static let socketStub = "#!/bin/bash\nexec /usr/bin/python3 -c 'import os,socket,sys,time; s=socket.socket(socket.AF_UNIX); s.bind(os.path.join(os.environ[\"MR_X11_DIR\"], \"X\" + sys.argv[1].lstrip(\":\"))); s.listen(1); time.sleep(5)' \"$1\"\n"
+
+    func testGUIStartupFailsWhenXvfbExitsAfterCreatingItsSocket() throws {
+        let stub = "#!/bin/bash\n/usr/bin/python3 -c 'import os,socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(os.path.join(os.environ[\"MR_X11_DIR\"], \"X\" + sys.argv[1].lstrip(\":\")))' \"$1\"\nexit 1\n"
+        let result = try runGUIStartup(xvfbStub: stub)
+        XCTAssertNotEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("did not start"), result.output)
+        XCTAssertFalse(result.registered)
+    }
+
+    func testGUIStartupRequiresAClientToConnectWhenXdpyinfoIsAvailable() throws {
+        let refused = try runGUIStartup(xvfbStub: Self.socketStub, xdpyinfoStub: "#!/bin/bash\nexit 1\n")
+        XCTAssertNotEqual(refused.status, 0, refused.output)
+        XCTAssertFalse(refused.registered)
+
+        let accepted = try runGUIStartup(xvfbStub: Self.socketStub, xdpyinfoStub: "#!/bin/bash\n[ \"$DISPLAY\" = :99 ]\n")
+        XCTAssertEqual(accepted.status, 0, accepted.output)
+        XCTAssertTrue(accepted.registered)
     }
 }
