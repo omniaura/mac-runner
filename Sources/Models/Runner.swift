@@ -323,6 +323,7 @@ struct AppSettings: Codable, Sendable, Equatable {
     var automaticDiskCleanupEnabled: Bool
     var minimumFreeDiskSpaceGB: Int
     var openFileLimit: Int
+    var resourceAlerts: ResourceAlertSettings
 
     static let `default` = AppSettings(
         startOnLogin: false,
@@ -337,7 +338,8 @@ struct AppSettings: Codable, Sendable, Equatable {
         autoRestartMaxRetries: 5,
         automaticDiskCleanupEnabled: false,
         minimumFreeDiskSpaceGB: 100,
-        openFileLimit: ResourceLimits.defaultOpenFileLimit
+        openFileLimit: ResourceLimits.defaultOpenFileLimit,
+        resourceAlerts: .default
     )
 
     static let defaultBatteryPauseThreshold = 20
@@ -360,7 +362,8 @@ struct AppSettings: Codable, Sendable, Equatable {
         autoRestartMaxRetries: Int = 5,
         automaticDiskCleanupEnabled: Bool = false,
         minimumFreeDiskSpaceGB: Int = 100,
-        openFileLimit: Int = ResourceLimits.defaultOpenFileLimit
+        openFileLimit: Int = ResourceLimits.defaultOpenFileLimit,
+        resourceAlerts: ResourceAlertSettings = .default
     ) {
         self.startOnLogin = startOnLogin
         self.pauseOnBattery = pauseOnBattery
@@ -375,6 +378,7 @@ struct AppSettings: Codable, Sendable, Equatable {
         self.automaticDiskCleanupEnabled = automaticDiskCleanupEnabled
         self.minimumFreeDiskSpaceGB = max(1, minimumFreeDiskSpaceGB)
         self.openFileLimit = ResourceLimits.normalizedOpenFileLimit(openFileLimit) ?? ResourceLimits.defaultOpenFileLimit
+        self.resourceAlerts = resourceAlerts
     }
 
     init(from decoder: Decoder) throws {
@@ -396,6 +400,7 @@ struct AppSettings: Codable, Sendable, Equatable {
         openFileLimit = ResourceLimits.normalizedOpenFileLimit(
             try container.decodeIfPresent(Int.self, forKey: .openFileLimit)
         ) ?? ResourceLimits.defaultOpenFileLimit
+        resourceAlerts = try container.decodeIfPresent(ResourceAlertSettings.self, forKey: .resourceAlerts) ?? .default
     }
 }
 

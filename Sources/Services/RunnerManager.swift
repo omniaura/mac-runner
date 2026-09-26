@@ -32,6 +32,8 @@ class RunnerManager: ObservableObject {
     @Published private(set) var gitHubAuthIssue: String?
     /// Internal battery state; nil on Macs without a battery.
     @Published private(set) var powerState: PowerState?
+    /// Latest CPU/memory/disk sample per running runner.
+    @Published private(set) var resourceUsage: [UUID: RunnerResourceUsage] = [:]
     /// Busy runners that will pause as soon as their current job finishes.
     @Published private(set) var pendingAutoPauses: [UUID: AutoPauseReason] = [:]
 
@@ -76,6 +78,10 @@ class RunnerManager: ObservableObject {
     private var installedUpdateVersion: String?
     private var lastAutomaticDiskCleanupCheck: Date?
     private var lastLogMaintenance: Date?
+    private var lastDiskMeasurement: Date?
+    private var workspaceSizes: [UUID: UInt64] = [:]
+    private var containerCPUSamples: [UUID: (usec: UInt64, at: Date)] = [:]
+    private var resourceAlertActive = false
     private let powerMonitor = PowerSourceMonitor()
     /// Only the menu bar app pauses/resumes runners automatically; one-shot CLI
     /// commands also construct a RunnerManager and must not.
@@ -1078,6 +1084,102 @@ class RunnerManager: ObservableObject {
         }
     }
 
+    // MARK: - Resource Usage
+
+    var totalResourceUsage: RunnerResourceUsage {
+        RunnerResourceUsage.total(Array(resourceUsage.values))
+    }
+
+    /// Sample CPU and memory for every running runner, and workspace size every
+    /// few minutes (or when `measureDisk` is set). Sampling runs off the main actor.
+    func refreshResourceUsage(now: Date = Date(), measureDisk: Bool = false) async {
+        let shouldMeasureDisk = measureDisk || lastDiskMeasurement.map { now.timeIntervalSince($0) >= 300 } ?? true
+        if shouldMeasureDisk { lastDiskMeasurement = now }
+
+        struct Target: Sendable {
+            let id: UUID
+            let pid: pid_t?
+            let directory: String
+        }
+        var containerIDs: [UUID] = []
+        let targets: [Target] = runners.filter { $0.status == .running }.compactMap { runner in
+            let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
+            let directory = RunnerDirectory.directoryURL(for: runner.id, isolation: isolation).path
+            if isolation == .container {
+                containerIDs.append(runner.id)
+                return Target(id: runner.id, pid: nil, directory: directory)
+            }
+            let pid = runnerProcesses[runner.id]?.processIdentifier ?? pidManager.readPID(for: runner.id)
+            return Target(id: runner.id, pid: pid, directory: directory)
+        }
+
+        let sampled: [(UUID, RunnerResourceUsage, UInt64?)] = await Task.detached(priority: .utility) {
+            targets.map { target in
+                let usage = target.pid.map { ResourceMonitor.usage(ofProcessTree: $0) } ?? .zero
+                let disk = shouldMeasureDisk ? ResourceMonitor.directorySize(target.directory) : nil
+                return (target.id, usage, disk)
+            }
+        }.value
+
+        var usage: [UUID: RunnerResourceUsage] = [:]
+        for (id, sample, disk) in sampled {
+            if let disk { workspaceSizes[id] = disk }
+            var entry = sample
+            if containerIDs.contains(id) {
+                entry = await containerUsage(for: id, now: now) ?? entry
+            }
+            entry.diskBytes = workspaceSizes[id]
+            usage[id] = entry
+        }
+
+        let active = Set(usage.keys)
+        workspaceSizes = workspaceSizes.filter { active.contains($0.key) }
+        containerCPUSamples = containerCPUSamples.filter { active.contains($0.key) }
+        resourceUsage = usage
+        await checkResourceAlerts()
+    }
+
+    private func containerUsage(for id: UUID, now: Date) async -> RunnerResourceUsage? {
+        #if canImport(Containerization)
+        guard #available(macOS 26.0, *),
+              let container = runnerContainers[id] as? LinuxContainer,
+              let stats = try? await container.statistics(categories: [.memory, .cpu, .process]) else {
+            return nil
+        }
+        var cpu = 0.0
+        if let usec = stats.cpu?.usageUsec {
+            if let previous = containerCPUSamples[id] {
+                cpu = ResourceMonitor.cpuPercent(previousUsec: previous.usec, currentUsec: usec, elapsed: now.timeIntervalSince(previous.at))
+            }
+            containerCPUSamples[id] = (usec, now)
+        }
+        return RunnerResourceUsage(
+            cpuPercent: cpu,
+            memoryBytes: stats.memory?.usageBytes ?? 0,
+            processCount: Int(stats.process?.current ?? 0),
+            diskBytes: nil
+        )
+        #else
+        return nil
+        #endif
+    }
+
+    /// Notify once when total usage crosses the configured limits; re-arm after it drops back.
+    private func checkResourceAlerts() async {
+        let reasons = currentSettings.resourceAlerts.exceeded(by: totalResourceUsage)
+        guard !reasons.isEmpty else {
+            resourceAlertActive = false
+            return
+        }
+        guard !resourceAlertActive else { return }
+        resourceAlertActive = true
+        await jobNotificationService.notifyStatus(
+            identifier: "resource-alert",
+            title: "Runners are using a lot of resources",
+            body: "Total " + reasons.joined(separator: ", ") + "."
+        )
+    }
+
     // MARK: - External Config Changes
 
     /// Fold in edits another process (the CLI) wrote to the config file since
@@ -1253,6 +1355,7 @@ class RunnerManager: ObservableObject {
         if automationEnabled {
             reloadExternalConfigChanges()
             await evaluateAutoPause()
+            await refreshResourceUsage()
         }
     }
 

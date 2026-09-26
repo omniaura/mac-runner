@@ -193,3 +193,62 @@ struct RunnerScheduleView: View {
         }
     }
 }
+
+/// Settings for alerting when runners' combined usage is high.
+struct ResourceAlertSettingsSection: View {
+    @EnvironmentObject var runnerManager: RunnerManager
+
+    private var alerts: ResourceAlertSettings { runnerManager.currentSettings.resourceAlerts }
+
+    private func update(_ change: (inout ResourceAlertSettings) -> Void) {
+        var settings = runnerManager.currentSettings
+        change(&settings.resourceAlerts)
+        runnerManager.updateSettings(settings)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Toggle("Alert on High Resource Usage", isOn: Binding(
+                get: { alerts.enabled },
+                set: { newValue in update { $0.enabled = newValue } }
+            ))
+
+            HStack {
+                Text("Total CPU above")
+                Spacer()
+                Text("\(alerts.cpuPercent)%")
+                    .monospacedDigit()
+                    .foregroundColor(.secondary)
+                Stepper(
+                    value: Binding(get: { alerts.cpuPercent }, set: { newValue in update { $0.cpuPercent = newValue } }),
+                    in: 50...3200,
+                    step: 50
+                ) {
+                    EmptyView()
+                }
+                .labelsHidden()
+            }
+            .disabled(!alerts.enabled)
+
+            HStack {
+                Text("Total memory above")
+                Spacer()
+                Text("\(alerts.memoryGB) GB")
+                    .monospacedDigit()
+                    .foregroundColor(.secondary)
+                Stepper(
+                    value: Binding(get: { alerts.memoryGB }, set: { newValue in update { $0.memoryGB = newValue } }),
+                    in: 1...512
+                ) {
+                    EmptyView()
+                }
+                .labelsHidden()
+            }
+            .disabled(!alerts.enabled)
+
+            Text("CPU is summed across runners (100% = one core). Each runner's usage appears under it in the menu; you're notified once when a limit is crossed.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+}
