@@ -796,6 +796,9 @@ class RunnerManager: ObservableObject {
         launchTokens.removeValue(forKey: id)
 
         runners[index].status = .stopped
+        // A stopped runner isn't executing anything; don't let a stale flag
+        // show job activity after it restarts.
+        runners[index].busy = false
         runners[index].lastRestartEvent = nil
         saveConfiguration()
     }
@@ -845,6 +848,7 @@ class RunnerManager: ObservableObject {
         for i in runners.indices {
             if runners[i].status == .running && !processManager.isProcessAlive(for: runners[i].id) {
                 runners[i].status = .stopped
+                runners[i].busy = false
                 pidManager.removePID(for: runners[i].id)
                 changed = true
             }
@@ -1143,8 +1147,10 @@ class RunnerManager: ObservableObject {
         pidManager.removePID(for: id)
 
         let wasManualStop = manualStopRequests.remove(id) != nil
+        activeWorkflowJobs.removeValue(forKey: id)
 
         if let index = runners.firstIndex(where: { $0.id == id }) {
+            runners[index].busy = false
             if cause.isUnexpected && !wasManualStop {
                 if scheduleAutoRestart(for: id, cause: cause, runnerIndex: index) {
                     saveConfiguration()

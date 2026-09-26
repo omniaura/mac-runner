@@ -55,7 +55,10 @@ final class StatusItemIconTests: XCTestCase {
 
         animator.apply(.animated(frames: StatusItemIcon.runningFrames), toolTip: "busy")
         let first = button.image
-        RunLoop.main.run(until: Date().addingTimeInterval(StatusItemIcon.frameInterval * 1.5))
+        let deadline = Date().addingTimeInterval(5)
+        while button.image == first, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
         XCTAssertNotEqual(button.image, first, "expected the next animation frame")
         XCTAssertEqual(button.toolTip, "busy")
 

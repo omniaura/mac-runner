@@ -62,13 +62,16 @@ final class StatusItemIconAnimator {
         case .animated(let frames):
             frameIndex = 0
             setImage(frames[0])
-            timer = Timer.scheduledTimer(withTimeInterval: StatusItemIcon.frameInterval, repeats: true) { [weak self] _ in
+            let timer = Timer(timeInterval: StatusItemIcon.frameInterval, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.frameIndex = (self.frameIndex + 1) % frames.count
                     self.setImage(frames[self.frameIndex])
                 }
             }
+            // .common keeps the animation going while a menu is being tracked.
+            RunLoop.main.add(timer, forMode: .common)
+            self.timer = timer
         }
     }
 
