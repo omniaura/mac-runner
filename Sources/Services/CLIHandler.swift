@@ -158,6 +158,7 @@ enum CLIHandler {
           --labels <l1,l2>     Comma-separated labels (default: macos)
           --isolation <mode>   Isolation mode: none|user|container (default: global)
           --enable-gui         Enable GUI access (default: headless)
+          --image <ref>        Container image for --isolation container (default: ghcr.io/actions/actions-runner:latest)
 
         SETUP OPTIONS:
           --teardown        Remove isolation (delete user, sudoers, reset config)
@@ -201,6 +202,7 @@ enum CLIHandler {
           mac-runner add owner/repo --name my-runner --labels macos,arm64
           mac-runner add my-org --org --labels macos,arm64
           mac-runner add owner/repo --isolation container
+          mac-runner add owner/repo --isolation container --image ghcr.io/myorg/runner:latest
           mac-runner add owner/repo --isolation user
           mac-runner add owner/repo --enable-gui
           mac-runner list
@@ -277,11 +279,12 @@ enum CLIHandler {
         }
 
         var name = "mac-runner-\(ProcessInfo.processInfo.hostName.prefix(8))-\(Int.random(in: 1000...9999))"
-        var labels = ["macos", "mac-runner"]
+        var labels: [String]?
         var isolationMode: IsolationMode? = nil
         var enableGUI = false
         var openFileLimit: Int? = nil
         var scope: RunnerScope = .repo
+        var image: String?
 
         // Parse optional flags
         var i = 1
@@ -316,6 +319,9 @@ enum CLIHandler {
             case "--enable-gui":
                 enableGUI = true
                 i += 1
+            case "--image" where i + 1 < args.count:
+                image = args[i + 1]
+                i += 2
             case "--open-files" where i + 1 < args.count:
                 guard let parsed = Int(args[i + 1]), parsed > 0 else {
                     print("Error: --open-files must be a positive integer")
@@ -349,18 +355,25 @@ enum CLIHandler {
             return
         }
 
+        let manager = RunnerManager()
+        let effectiveIsolation = isolationMode ?? manager.currentSettings.isolationMode
+        if image != nil && effectiveIsolation != .container {
+            print("Error: --image only applies to container isolation (--isolation container)")
+            return
+        }
+
         let scopeLabel = scope == .org ? "\(target) (org)" : target
         print("Adding runner '\(name)' for \(scopeLabel)...")
-        let manager = RunnerManager()
         do {
             try await manager.addRunner(
                 name: name,
                 repo: target,
                 scope: scope,
-                labels: labels,
+                labels: labels ?? Runner.defaultLabels(for: effectiveIsolation),
                 isolationMode: isolationMode,
                 enableGUI: enableGUI,
-                openFileLimit: openFileLimit
+                openFileLimit: openFileLimit,
+                containerImage: image
             )
             var message = "Runner '\(name)' added"
             if let mode = isolationMode {
@@ -374,9 +387,48 @@ enum CLIHandler {
             }
             message += " and started successfully!"
             print(message)
+            if let runner = manager.runner(named: name) {
+                await keepContainerRunnerInForeground(runner, manager: manager)
+            }
         } catch {
             print("Error: \(error.localizedDescription)")
         }
+    }
+
+    /// A container runner's Linux VM lives inside the process that started it,
+    /// so a CLI-started one runs in the foreground until Ctrl-C stops it.
+    @MainActor
+    static func keepContainerRunnerInForeground(_ runner: Runner, manager: RunnerManager) async {
+        guard runner.effectiveIsolationMode(global: manager.currentSettings.isolationMode) == .container else { return }
+        print("Container runners run inside this process. Leave it open; press Ctrl-C to stop the runner.")
+        print("(Start it from the Mac Runner menu bar app to keep it running in the background.)")
+
+        signal(SIGINT, SIG_IGN)
+        let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+        var stopRequested = false
+        interrupt.setEventHandler { stopRequested = true }
+        interrupt.resume()
+        defer {
+            interrupt.cancel()
+            signal(SIGINT, SIG_DFL)
+        }
+
+        setvbuf(stdout, nil, _IOLBF, 0)
+        let logPath = manager.logPath(for: runner, source: .output)
+        var follower = logPath.map { LogFollower(path: $0, startAtEnd: false) }
+        while manager.runners.first(where: { $0.id == runner.id })?.status == .running {
+            if stopRequested {
+                print("\nStopping '\(runner.name)'...")
+                try? await manager.stopRunner(runner.id)
+                break
+            }
+            for line in follower?.readNewLines() ?? [] {
+                print(line)
+            }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        follower = nil
+        print("Runner '\(runner.name)' stopped.")
     }
 
     @MainActor
@@ -420,6 +472,7 @@ enum CLIHandler {
         do {
             try await manager.startRunner(runner.id)
             print("Runner '\(name)' started.")
+            await keepContainerRunnerInForeground(runner, manager: manager)
         } catch {
             print("Error: \(error.localizedDescription)")
         }

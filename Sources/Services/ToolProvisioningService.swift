@@ -61,6 +61,17 @@ struct ToolProvisioningService: Sendable {
         try await ensureInstalled(packages: plan.packages)
     }
 
+    /// Tools a container runner should install when its container starts:
+    /// gh, toolchains detected from the repo's root files, and extra packages.
+    /// Decided once, when the runner is created.
+    func containerToolPlan(for repo: String?, settings: ToolProvisioningSettings) async -> [String] {
+        var rootEntries: Set<String> = []
+        if let repo {
+            rootEntries = (try? await fetchRepositoryRootEntries(repo)) ?? []
+        }
+        return Self.plan(rootEntries: rootEntries, settings: settings).packages
+    }
+
     private func ensureInstalled(packages: [String]) async throws {
         guard !packages.isEmpty else { return }
 

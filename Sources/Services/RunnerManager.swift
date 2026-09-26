@@ -493,12 +493,13 @@ class RunnerManager: ObservableObject {
         labels: [String],
         isolationMode: IsolationMode? = nil,
         enableGUI: Bool = false,
-        openFileLimit: Int? = nil
+        openFileLimit: Int? = nil,
+        containerImage: String? = nil
     ) async throws {
         isLoading = true
         defer { isLoading = false }
 
-        let runner = Runner(
+        var runner = Runner(
             name: name,
             repo: repo,
             scope: scope,
@@ -512,6 +513,9 @@ class RunnerManager: ObservableObject {
 
         let effectiveIsolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
         let target = runner.target
+        if effectiveIsolation == .container {
+            runner.containerImage = containerImage.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+        }
 
         try await toolProvisioningService.ensureGitHubCLI(isolation: effectiveIsolation)
 
@@ -533,18 +537,27 @@ class RunnerManager: ObservableObject {
             )
         }
 
-        // Get registration token from GitHub via gh CLI
-        let registrationToken = try await ghService.getRegistrationToken(for: target)
+        if effectiveIsolation == .container {
+            // The Linux runner registers from inside its container when it starts;
+            // decide now which tools that container installs.
+            runner.containerTools = await toolProvisioningService.containerToolPlan(
+                for: scope == .repo ? repo : nil,
+                settings: currentSettings.tools
+            )
+        } else {
+            // Get registration token from GitHub via gh CLI
+            let registrationToken = try await ghService.getRegistrationToken(for: target)
 
-        // Download, configure, and install runner
-        try await RunnerInstaller.shared.setupRunner(
-            target: target,
-            registrationToken: registrationToken,
-            name: name,
-            labels: labels,
-            runnerId: runner.id,
-            isolation: effectiveIsolation
-        )
+            // Download, configure, and install runner
+            try await RunnerInstaller.shared.setupRunner(
+                target: target,
+                registrationToken: registrationToken,
+                name: name,
+                labels: labels,
+                runnerId: runner.id,
+                isolation: effectiveIsolation
+            )
+        }
 
         // Look up the GitHub-assigned runner ID so we can delete it later
         var registeredRunner = runner
@@ -574,9 +587,15 @@ class RunnerManager: ObservableObject {
             try? await stopRunner(id)
         }
 
-        // Remove from GitHub via gh CLI
+        // Remove from GitHub via gh CLI. Container runners register from inside
+        // their container, so their GitHub ID may only be findable by name.
         if let runner = runners.first(where: { $0.id == id }) {
-            if let ghId = runner.githubRunnerId {
+            var githubRunnerId = runner.githubRunnerId
+            if githubRunnerId == nil,
+               let remote = try? await ghService.listRemoteRunners(for: runner.target) {
+                githubRunnerId = remote.first(where: { $0.name == runner.name })?.id
+            }
+            if let ghId = githubRunnerId {
                 try? await ghService.deleteRunner(target: runner.target, githubRunnerId: ghId)
             }
         }
@@ -644,7 +663,8 @@ class RunnerManager: ObservableObject {
 
         // Get runner directory
         let runnerDir = try RunnerDirectory.path(for: id, isolation: isolation)
-        let needsRunnerSetup = !FileManager.default.fileExists(atPath: "\(runnerDir)/run.sh")
+        // Container runners install and register inside their container.
+        let needsRunnerSetup = isolation != .container && !FileManager.default.fileExists(atPath: "\(runnerDir)/run.sh")
 
         // Ensure runner binary is downloaded and configured
         if needsRunnerSetup {
@@ -665,9 +685,7 @@ class RunnerManager: ObservableObject {
 
         // Container isolation requires special handling
         if case .container = isolation {
-            if !needsRunnerSetup {
-                try await validateGitHubAuth(for: runner, operation: "start runner")
-            }
+            try await validateGitHubAuth(for: runner, operation: "start runner")
             // Container-based isolation (macOS 26+)
             #if canImport(Containerization)
             if #available(macOS 26.0, *) {
@@ -689,11 +707,12 @@ class RunnerManager: ObservableObject {
                 // Create container configuration. `repositoryURL` is the value passed to
                 // `config.sh --url` inside the container, so it must point at the org or
                 // repo depending on the runner's scope.
+                let runnerVersion = await RunnerInstaller.shared.resolveRunnerVersion()
                 let containerConfig = ContainerRunnerConfiguration(
-                    containerImage: nil,  // Use default GitHub Actions runner image
+                    containerImage: runner.containerImage,
                     cpuCount: 2,
-                    memoryInBytes: 2 * 1024 * 1024 * 1024,  // 2 GiB
-                    diskSizeInBytes: 4 * 1024 * 1024 * 1024,  // 4 GiB
+                    memoryInBytes: 4 * 1024 * 1024 * 1024,  // 4 GiB
+                    diskSizeInBytes: 16 * 1024 * 1024 * 1024,  // 16 GiB (sparse)
                     enableNestedVirtualization: false,
                     // Mount only _work and _diag, so runner.log and diagnostics sit
                     // in the runner directory like other modes and stay out of jobs' view.
@@ -701,6 +720,10 @@ class RunnerManager: ObservableObject {
                     diagnosticsURL: try Self.makeDirectory(runnerDir, "_diag"),
                     repositoryURL: runner.target.registrationURL,
                     registrationToken: registrationToken,
+                    runnerName: runner.name,
+                    labels: runner.labels,
+                    tools: runner.containerTools ?? [],
+                    runnerDownloadURL: RunnerInstaller.linuxDownloadURL(version: runnerVersion),
                     openFileLimit: runner.effectiveOpenFileLimit(global: currentSettings.openFileLimit),
                     logWriter: try {
                         RunnerLogs.rotateIfNeeded(logFile)
@@ -720,6 +743,9 @@ class RunnerManager: ObservableObject {
                 // Store container reference
                 runnerContainers[id] = container
                 launchTokens[id] = launchToken
+                // The VM lives in this process; record it so other Mac Runner
+                // processes see the runner as running rather than stale.
+                try? pidManager.writePID(ProcessInfo.processInfo.processIdentifier, for: id)
 
                 // Monitor container in background
                 Task {
@@ -830,7 +856,13 @@ class RunnerManager: ObservableObject {
                         }
                         try await containerService.deleteContainer(id: id.uuidString)
                         runnerContainers.removeValue(forKey: id)
+                        pidManager.removePID(for: id)
+                    } else if let host = pidManager.readPID(for: id),
+                              host != ProcessInfo.processInfo.processIdentifier,
+                              pidManager.isProcessAlive(host) {
+                        throw RunnerError.containerHostedElsewhere(pid: host)
                     } else {
+                        pidManager.removePID(for: id)
                         throw RunnerError.notRunning
                     }
                 }
@@ -1404,6 +1436,7 @@ class RunnerManager: ObservableObject {
         runners[index].enableGUI = desired.enableGUI
         runners[index].openFileLimit = desired.openFileLimit
         runners[index].quietHours = desired.quietHours
+        runners[index].containerImage = desired.containerImage
         saveConfiguration()
         guard restart else { return nil }
 
@@ -1432,7 +1465,8 @@ class RunnerManager: ObservableObject {
             labels: desired.labels,
             isolationMode: desired.isolation,
             enableGUI: desired.enableGUI,
-            openFileLimit: desired.openFileLimit
+            openFileLimit: desired.openFileLimit,
+            containerImage: desired.containerImage
         )
         if let quietHours = desired.quietHours, let runner = runner(named: desired.name) {
             setQuietHours(quietHours, for: runner.id)
@@ -1668,7 +1702,8 @@ class RunnerManager: ObservableObject {
             labels: originalRunner.labels,
             isolationMode: originalRunner.isolationMode,
             enableGUI: originalRunner.enableGUI,
-            openFileLimit: originalRunner.openFileLimit
+            openFileLimit: originalRunner.openFileLimit,
+            containerImage: originalRunner.containerImage
         )
     }
 
@@ -1700,6 +1735,7 @@ class RunnerManager: ObservableObject {
         isolationMode: IsolationMode? = nil,
         enableGUI: Bool = false,
         openFileLimit: Int? = nil,
+        containerImage: String? = nil,
         onProgress: ((Int, Int) -> Void)? = nil
     ) async throws {
         guard count >= 1 else { return }
@@ -1713,7 +1749,8 @@ class RunnerManager: ObservableObject {
                 labels: labels,
                 isolationMode: isolationMode,
                 enableGUI: enableGUI,
-                openFileLimit: openFileLimit
+                openFileLimit: openFileLimit,
+                containerImage: containerImage
             )
             onProgress?(1, 1)
             return
@@ -1746,7 +1783,8 @@ class RunnerManager: ObservableObject {
                     labels: labels,
                     isolationMode: isolationMode,
                     enableGUI: enableGUI,
-                    openFileLimit: openFileLimit
+                    openFileLimit: openFileLimit,
+                    containerImage: containerImage
                 )
             } catch {
                 errors.append((name: name, error: error))
@@ -2130,6 +2168,7 @@ enum RunnerError: LocalizedError {
     case startFailed
     case containerServiceNotAvailable
     case bulkCreationPartialFailure(succeeded: Int, failed: Int, details: String)
+    case containerHostedElsewhere(pid: pid_t)
 
     var errorDescription: String? {
         switch self {
@@ -2142,6 +2181,8 @@ enum RunnerError: LocalizedError {
             return "Container isolation requires macOS 26.0+ and is not available on this system"
         case .bulkCreationPartialFailure(let succeeded, let failed, let details):
             return "Bulk creation: \(succeeded) succeeded, \(failed) failed (\(details))"
+        case .containerHostedElsewhere(let pid):
+            return "This container runner's VM runs inside another Mac Runner process (pid \(pid)). Stop it there: Ctrl-C in that terminal, or the menu bar app."
         }
     }
 }

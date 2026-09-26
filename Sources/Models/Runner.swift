@@ -37,6 +37,11 @@ struct Runner: Identifiable, Codable, Sendable, Equatable {
     /// Set when the runner was started by hand while paused for this reason; it
     /// keeps running until that condition clears. Persisted so a CLI start holds too.
     var autoPauseOverride: AutoPauseReason?
+    /// Container isolation: OCI image to run (nil = the default runner image).
+    var containerImage: String?
+    /// Container isolation: tools chosen when the runner was created, installed
+    /// each time its container starts.
+    var containerTools: [String]?
 
     init(
         id: UUID = UUID(),
@@ -97,6 +102,8 @@ struct Runner: Identifiable, Codable, Sendable, Equatable {
         quietHours = try container.decodeIfPresent(QuietHours.self, forKey: .quietHours)
         autoPauseReason = try container.decodeIfPresent(AutoPauseReason.self, forKey: .autoPauseReason)
         autoPauseOverride = try container.decodeIfPresent(AutoPauseReason.self, forKey: .autoPauseOverride)
+        containerImage = try container.decodeIfPresent(String.self, forKey: .containerImage)
+        containerTools = try container.decodeIfPresent([String].self, forKey: .containerTools)
     }
 
     /// User-editable settings, compared when reconciling concurrent config edits.
@@ -111,6 +118,8 @@ struct Runner: Identifiable, Codable, Sendable, Equatable {
         var enableGUI: Bool
         var openFileLimit: Int?
         var quietHours: QuietHours?
+        var containerImage: String?
+        var containerTools: [String]?
     }
 
     var configuration: Configuration {
@@ -118,7 +127,8 @@ struct Runner: Identifiable, Codable, Sendable, Equatable {
             Configuration(
                 name: name, repo: repo, scope: scope, labels: labels, enabled: enabled,
                 githubRunnerId: githubRunnerId, isolationMode: isolationMode, enableGUI: enableGUI,
-                openFileLimit: openFileLimit, quietHours: quietHours
+                openFileLimit: openFileLimit, quietHours: quietHours,
+                containerImage: containerImage, containerTools: containerTools
             )
         }
         set {
@@ -132,6 +142,8 @@ struct Runner: Identifiable, Codable, Sendable, Equatable {
             enableGUI = newValue.enableGUI
             openFileLimit = newValue.openFileLimit
             quietHours = newValue.quietHours
+            containerImage = newValue.containerImage
+            containerTools = newValue.containerTools
         }
     }
 
@@ -152,6 +164,11 @@ struct Runner: Identifiable, Codable, Sendable, Equatable {
     }
 
     static let defaultLabels = ["macos", "mac-runner"]
+
+    /// Container runners are Linux, so they shouldn't advertise `macos`.
+    static func defaultLabels(for isolation: IsolationMode) -> [String] {
+        isolation == .container ? ["linux", "mac-runner"] : defaultLabels
+    }
 
     /// Convenience target descriptor pairing this runner's scope and identifier.
     var target: RunnerTarget {

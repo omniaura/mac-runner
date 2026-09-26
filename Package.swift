@@ -14,7 +14,9 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/containerization.git", from: "0.25.1"),
+        // Exact: the guest init image (ContainerIsolationService.initfsReference) must
+        // match this version, or the VM's agent can't decode the host's requests.
+        .package(url: "https://github.com/apple/containerization.git", exact: "0.47.0"),
         .package(url: "https://github.com/jpsim/Yams.git", from: "6.2.0")
     ],
     targets: [

@@ -215,12 +215,14 @@ jobs:
 
           echo "Signing the binary..."
           codesign --force --options runtime \
+            --entitlements scripts/MacRunner.entitlements \
             --sign "$SIGNING_IDENTITY" \
             --timestamp \
             build/MacRunner.app/Contents/MacOS/MacRunner
 
           echo "Signing the app bundle..."
           codesign --force --options runtime --deep \
+            --entitlements scripts/MacRunner.entitlements \
             --sign "$SIGNING_IDENTITY" \
             --timestamp \
             build/MacRunner.app

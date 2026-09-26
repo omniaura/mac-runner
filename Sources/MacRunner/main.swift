@@ -3,6 +3,8 @@ import AppKit
 
 // Dispatch: CLI args → CLIHandler, no args → GUI
 if CommandLine.arguments.count > 1 {
+    // Show progress promptly even when output is piped (e.g. over ssh or into a log).
+    setvbuf(stdout, nil, _IOLBF, 0)
     // CLI mode: pump a run loop so async work completes
     let sema = DispatchSemaphore(value: 0)
     Task { @MainActor in

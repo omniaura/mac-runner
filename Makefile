@@ -24,6 +24,7 @@ app: release
 	@mkdir -p build/MacRunner.app/Contents/Resources
 	@cp .build/apple/Products/Release/mac-runner build/MacRunner.app/Contents/MacOS/MacRunner
 	@./scripts/generate-info-plist.sh > build/MacRunner.app/Contents/Info.plist
+	@codesign --force --sign - --entitlements scripts/MacRunner.entitlements build/MacRunner.app
 	@echo "App bundle created at build/MacRunner.app"
 
 # Create DMG
