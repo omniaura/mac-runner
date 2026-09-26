@@ -43,7 +43,7 @@ struct Runner: Identifiable, Codable, Sendable, Equatable {
         name: String,
         repo: String,
         scope: RunnerScope = .repo,
-        labels: [String] = ["macos", "mac-runner"],
+        labels: [String] = Runner.defaultLabels,
         enabled: Bool = true,
         status: RunnerStatus = .stopped,
         githubRunnerId: Int? = nil,
@@ -150,6 +150,8 @@ struct Runner: Identifiable, Codable, Sendable, Equatable {
             autoPauseOverride = newValue.autoPauseOverride
         }
     }
+
+    static let defaultLabels = ["macos", "mac-runner"]
 
     /// Convenience target descriptor pairing this runner's scope and identifier.
     var target: RunnerTarget {
@@ -491,6 +493,15 @@ struct QuietHours: Codable, Sendable, Equatable {
 
     var displayRange: String {
         "\(start)–\(end)"
+    }
+
+    /// Same effect on pausing: disabled windows match regardless of their times.
+    static func equivalent(_ lhs: QuietHours?, _ rhs: QuietHours?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil): return true
+        case let (lhs?, rhs?): return lhs == rhs || (!lhs.enabled && !rhs.enabled)
+        default: return false
+        }
     }
 }
 

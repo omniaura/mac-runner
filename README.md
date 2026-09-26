@@ -135,6 +135,55 @@ owned by a dedicated service user, which live outside your home directory. Runne
 without deregistering stay listed in the repository's Actions settings as permanently
 offline.
 
+## Declarative Configuration
+
+Describe your runners in a file and let `mac-runner apply` create, update, and remove them to match. This makes a setup easy to reproduce on another Mac or to keep in version control.
+
+```bash
+# Start from what you have now
+mac-runner export -o .mac-runner.yml
+
+# Preview, then apply
+mac-runner apply --dry-run
+mac-runner apply
+```
+
+`apply` reads `-f <path>`, or `./.mac-runner.yml`, or `~/.mac-runner/config.yml`, in that order. It prints its plan first and asks before removing or re-registering runners (`--yes` skips the prompt). `--no-prune` keeps runners that aren't in the file. Running it again when nothing has changed does nothing.
+
+```yaml
+version: 1
+
+# Optional global settings
+settings:
+  isolation: user                  # none | user | container
+  quiet-hours: { start: "22:00", end: "06:00" }   # or: never
+  pause-on-battery: true
+  battery-threshold: 20            # percent, 5-95
+
+runners:
+  - name: mac-runner-ci            # letters, digits, . _ -
+    repo: omniaura/mac-runner      # or `org: omniaura` for an organization runner
+    labels: [macos, swift]         # default: [macos, mac-runner]
+    count: 2                       # creates mac-runner-ci-1 and mac-runner-ci-2
+
+  - name: linux-builder
+    org: omniaura
+    isolation: container           # none | user | container | global (default: global)
+    enable-gui: false              # default: false (headless)
+    open-files: 65536              # default: the global limit
+    quiet-hours: never             # never | { start, end } (default: global schedule)
+```
+
+Runners are matched by name. What happens to an existing runner depends on what changed:
+
+| Change | What `apply` does |
+|---|---|
+| New name | Registers and starts the runner |
+| `repo`/`org`, `labels`, or `isolation` | Unregisters and registers the runner again |
+| `enable-gui` or `open-files` | Updates it, restarting it if it's running |
+| `quiet-hours` | Updates it in place |
+| Name no longer in the file | Unregisters it and deletes its workspace (unless `--no-prune`) |
+
 ## CI/CD: Self-Hosted Runner with Automatic Cloud Fallback
 
 Mac Runner uses a pattern that automatically routes CI jobs to your self-hosted Mac when it's online, and falls back to GitHub-hosted cloud runners when it's not. This means pushes to main always build, regardless of whether your Mac is on.

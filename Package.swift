@@ -14,13 +14,15 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/containerization.git", from: "0.25.1")
+        .package(url: "https://github.com/apple/containerization.git", from: "0.25.1"),
+        .package(url: "https://github.com/jpsim/Yams.git", from: "6.2.0")
     ],
     targets: [
         .executableTarget(
             name: "MacRunner",
             dependencies: [
-                .product(name: "Containerization", package: "containerization", condition: .when(platforms: [.macOS]))
+                .product(name: "Containerization", package: "containerization", condition: .when(platforms: [.macOS])),
+                .product(name: "Yams", package: "Yams")
             ],
             path: "Sources"
         ),

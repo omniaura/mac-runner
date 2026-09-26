@@ -1298,6 +1298,64 @@ class RunnerManager: ObservableObject {
         return merged
     }
 
+    // MARK: - Declarative Config
+
+    /// Carry out a plan from `ConfigPlanner`, reporting each step's outcome.
+    /// Returns the number of failed steps.
+    @discardableResult
+    func apply(
+        _ changes: [ConfigChange],
+        settings: AppSettings,
+        onStep: (ConfigChange, Error?) -> Void = { _, _ in }
+    ) async -> Int {
+        var failures = 0
+        for change in changes {
+            do {
+                switch change {
+                case .settings:
+                    updateSettings(settings)
+                case .add(let desired):
+                    try await addRunner(desired)
+                case .recreate(let runner, let desired, _):
+                    try await removeRunner(runner.id)
+                    try await addRunner(desired)
+                case .update(let runner, let desired, _, let restart):
+                    guard let index = runners.firstIndex(where: { $0.id == runner.id }) else { throw RunnerError.notFound }
+                    runners[index].enableGUI = desired.enableGUI
+                    runners[index].openFileLimit = desired.openFileLimit
+                    runners[index].quietHours = desired.quietHours
+                    saveConfiguration()
+                    if restart {
+                        try await stopRunner(runner.id)
+                        try await startRunner(runner.id)
+                    }
+                case .remove(let runner):
+                    try await removeRunner(runner.id)
+                }
+                onStep(change, nil)
+            } catch {
+                failures += 1
+                onStep(change, error)
+            }
+        }
+        return failures
+    }
+
+    private func addRunner(_ desired: DesiredRunner) async throws {
+        try await addRunner(
+            name: desired.name,
+            repo: desired.target.identifier,
+            scope: desired.target.scope,
+            labels: desired.labels,
+            isolationMode: desired.isolation,
+            enableGUI: desired.enableGUI,
+            openFileLimit: desired.openFileLimit
+        )
+        if let quietHours = desired.quietHours, let runner = runner(named: desired.name) {
+            setQuietHours(quietHours, for: runner.id)
+        }
+    }
+
     // MARK: - Lookup
 
     /// Find a runner by name.

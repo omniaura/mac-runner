@@ -101,6 +101,10 @@ enum CLIHandler {
             await handleUninstall(args: Array(args.dropFirst()))
         case "cleanup":
             await handleCleanup(args: Array(args.dropFirst()))
+        case "apply":
+            await handleApply(args: Array(args.dropFirst()))
+        case "export":
+            await handleExport(args: Array(args.dropFirst()))
         case "logs":
             await handleLogs(args: Array(args.dropFirst()))
         case "schedule":
@@ -135,6 +139,8 @@ enum CLIHandler {
           status            Show runner status summary (--resources for CPU/memory/disk)
           setup             Set up dedicated user isolation
           cleanup           Remove idle runner workspaces and CI caches
+          apply             Create/update/remove runners to match a config file
+          export            Write the current runners as a config file
           logs <name>       Show a runner's logs (--follow to stream, --diag for diagnostics)
           schedule          Show or set quiet hours (daily pause window)
           battery           Show or set pausing on low battery
@@ -152,6 +158,15 @@ enum CLIHandler {
 
         SETUP OPTIONS:
           --teardown        Remove isolation (delete user, sudoers, reset config)
+
+        APPLY OPTIONS:
+          -f, --file <path>           Config file (default ./.mac-runner.yml, then ~/.mac-runner/config.yml)
+          --dry-run                   Show the plan without changing anything
+          --yes, -y                   Don't ask before removing or re-registering runners
+          --no-prune                  Keep runners that aren't in the file
+
+        EXPORT OPTIONS:
+          -o, --output <path>         Write to a file instead of stdout
 
         LOGS OPTIONS:
           -n, --lines <N>             Show the last N lines (default 50)
@@ -192,6 +207,8 @@ enum CLIHandler {
           sudo mac-runner setup
           sudo mac-runner setup --teardown
           mac-runner cleanup --dry-run
+          mac-runner export -o .mac-runner.yml
+          mac-runner apply --dry-run
           mac-runner logs my-runner --follow
           mac-runner status --resources
           mac-runner schedule --start 22:00 --end 06:00
@@ -521,6 +538,109 @@ enum CLIHandler {
             }
         }
         return lines
+    }
+
+    @MainActor
+    private static func handleApply(args: [String]) async {
+        var path: String?
+        var dryRun = false
+        var assumeYes = false
+        var prune = true
+        var i = 0
+        while i < args.count {
+            switch args[i] {
+            case "-f", "--file":
+                guard i + 1 < args.count else {
+                    print("Error: \(args[i]) requires a path")
+                    return
+                }
+                path = args[i + 1]
+                i += 2
+            case "--dry-run": dryRun = true; i += 1
+            case "--yes", "-y": assumeYes = true; i += 1
+            case "--no-prune": prune = false; i += 1
+            default:
+                print("Error: unknown option '\(args[i])'")
+                return
+            }
+        }
+
+        let file = path ?? DeclarativeConfig.defaultPath()
+        guard let text = try? String(contentsOfFile: file, encoding: .utf8) else {
+            print("Error: can't read \(file). Create one with: mac-runner export -o .mac-runner.yml")
+            return
+        }
+
+        let manager = RunnerManager()
+        let desired: [DesiredRunner]
+        let desiredSettings: AppSettings
+        do {
+            let config = try DeclarativeConfig.parse(text)
+            desired = try config.desiredRunners()
+            desiredSettings = try config.resolvedSettings(manager.currentSettings)
+        } catch {
+            print("Error: \(error.localizedDescription)")
+            return
+        }
+
+        let changes = ConfigPlanner.plan(
+            desired: desired,
+            desiredSettings: desiredSettings,
+            current: manager.runners,
+            currentSettings: manager.currentSettings,
+            prune: prune
+        )
+        print("Plan for \(file):")
+        guard !changes.isEmpty else {
+            print("  No changes; runners already match.")
+            return
+        }
+        for change in changes {
+            print("  \(change.summary)")
+        }
+        guard !dryRun else { return }
+
+        if changes.contains(where: \.isDestructive) && !assumeYes {
+            print("\nThis removes or re-registers runners. Continue? [y/N] ", terminator: "")
+            guard readLine()?.lowercased().hasPrefix("y") == true else {
+                print("Cancelled.")
+                return
+            }
+        }
+
+        let failures = await manager.apply(changes, settings: desiredSettings) { change, error in
+            if let error {
+                print("✗ \(change.summary): \(error.localizedDescription)")
+            } else {
+                print("✓ \(change.summary)")
+            }
+        }
+        print(failures == 0 ? "Applied \(changes.count) change(s)." : "\(failures) of \(changes.count) change(s) failed.")
+    }
+
+    @MainActor
+    private static func handleExport(args: [String]) async {
+        var output: String?
+        if let index = args.firstIndex(where: { $0 == "-o" || $0 == "--output" }) {
+            guard index + 1 < args.count else {
+                print("Error: \(args[index]) requires a path")
+                return
+            }
+            output = args[index + 1]
+        }
+
+        let manager = RunnerManager()
+        do {
+            let yaml = try DeclarativeConfig.export(runners: manager.runners, settings: manager.currentSettings).yaml()
+            if let output {
+                try yaml.write(toFile: output, atomically: true, encoding: .utf8)
+                print("Wrote \(manager.runners.count) runner(s) to \(output)")
+            } else {
+                print(yaml, terminator: "")
+            }
+        } catch {
+            print("Error: \(error.localizedDescription)")
+        }
     }
 
     @MainActor
