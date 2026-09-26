@@ -298,6 +298,7 @@ cp -L opt/kata/share/kata-containers/vmlinux.container ~/Library/Application\ Su
 - linux/arm64 and `bash`
 - Either the GitHub Actions runner already installed at `/home/runner`, `/actions-runner`, or `/runner` (as in `ghcr.io/actions/actions-runner`), or `curl` and `tar` so Mac Runner can download it at start
 - `apt-get` (Debian/Ubuntu) if you want automatic tool installation. Other images still work; tools just aren't installed for you.
+- For GUI access: `Xvfb` preinstalled, or `apt-get` with a default user that is root or has passwordless `sudo` so Mac Runner can install it. Otherwise the runner doesn't start, rather than running GUI jobs without a display.
 
 **Tools.** When a container runner is created, Mac Runner picks the tools its jobs are likely to need: the GitHub CLI, toolchains detected from the repository (Node, Python, Go, Ruby, Rust), and any **Extra CI Tools** from Settings (installed as apt packages). They're installed with `apt-get` each time the runner's container starts, never per job.
 
