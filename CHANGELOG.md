@@ -1,3 +1,10 @@
+# [1.20.0](https://github.com/omniaura/mac-runner/compare/v1.19.1...v1.20.0) (2026-09-26)
+
+
+### Features
+
+* animate the menu bar icon while jobs are running ([#85](https://github.com/omniaura/mac-runner/issues/85)) ([2e12e0b](https://github.com/omniaura/mac-runner/commit/2e12e0bfef3d28fc0b29dd7010fcf2e8de9dcfc2)), closes [#16](https://github.com/omniaura/mac-runner/issues/16)
+
 ## [1.19.1](https://github.com/omniaura/mac-runner/compare/v1.19.0...v1.19.1) (2026-09-26)
 
 
