@@ -632,6 +632,10 @@ class RunnerManager: ObservableObject {
 
         scheduledRestarts[id]?.cancel()
         scheduledRestarts.removeValue(forKey: id)
+        // A stop followed by a start (restart) leaves the stop's marker behind:
+        // the old process's termination is ignored once its launch token is
+        // gone, so clear it here or the new process's crashes look manual.
+        manualStopRequests.remove(id)
         let launchToken = UUID()
 
         let runner = runners[index]
@@ -1296,6 +1300,143 @@ class RunnerManager: ObservableObject {
             merged.persistedState = disk.persistedState
         }
         return merged
+    }
+
+    // MARK: - Declarative Config
+
+    enum ApplyOutcome {
+        case applied(note: String?)
+        case failed(Error)
+    }
+
+    /// Carry out a plan from `ConfigPlanner`, reporting each change's outcome.
+    /// Returns the number of failed changes.
+    ///
+    /// Order matters: registrations to be added are checked first so a runner
+    /// isn't torn down for a replacement that can't be created; removals run
+    /// before any settings change, using the isolation the runner was started
+    /// with; additions and updates come last, under the new settings.
+    @discardableResult
+    func apply(
+        _ changes: [ConfigChange],
+        settings: AppSettings,
+        onStep: (ConfigChange, ApplyOutcome) -> Void = { _, _ in }
+    ) async -> Int {
+        var failed = Set<Int>()
+        func fail(_ index: Int, _ error: Error) {
+            failed.insert(index)
+            onStep(changes[index], .failed(error))
+        }
+
+        // 1. Check that every runner to be (re)registered can be.
+        for (index, change) in changes.enumerated() {
+            let desired: DesiredRunner
+            switch change {
+            case .add(let want), .recreate(_, let want, _): desired = want
+            default: continue
+            }
+            do {
+                try await preflightRegistration(desired)
+            } catch {
+                fail(index, error)
+            }
+        }
+
+        // 2. Tear down with the current settings.
+        for (index, change) in changes.enumerated() where !failed.contains(index) {
+            switch change {
+            case .remove(let runner):
+                do {
+                    try await removeRunner(runner.id)
+                    onStep(change, .applied(note: nil))
+                } catch {
+                    fail(index, error)
+                }
+            case .recreate(let runner, _, _):
+                do {
+                    try await removeRunner(runner.id)
+                } catch {
+                    fail(index, error)
+                }
+            default:
+                continue
+            }
+        }
+
+        // 3. Settings.
+        for (index, change) in changes.enumerated() where !failed.contains(index) {
+            if case .settings = change {
+                updateSettings(settings)
+                onStep(change, .applied(note: nil))
+            }
+        }
+
+        // 4. Add and update under the new settings.
+        for (index, change) in changes.enumerated() where !failed.contains(index) {
+            do {
+                switch change {
+                case .add(let desired):
+                    try await addRunner(desired)
+                    onStep(change, .applied(note: nil))
+                case .recreate(_, let desired, _):
+                    do {
+                        try await addRunner(desired)
+                    } catch {
+                        throw ConfigApplyError.reregistrationFailed(name: desired.name, underlying: error)
+                    }
+                    onStep(change, .applied(note: nil))
+                case .update(let runner, let desired, _, let restart):
+                    onStep(change, .applied(note: try await update(runner, to: desired, restart: restart)))
+                default:
+                    continue
+                }
+            } catch {
+                fail(index, error)
+            }
+        }
+        return failed.count
+    }
+
+    /// Apply an in-place update; returns a note when a restart was deferred.
+    private func update(_ runner: Runner, to desired: DesiredRunner, restart: Bool) async throws -> String? {
+        guard let index = runners.firstIndex(where: { $0.id == runner.id }) else { throw RunnerError.notFound }
+        runners[index].isolationMode = desired.isolation
+        runners[index].enableGUI = desired.enableGUI
+        runners[index].openFileLimit = desired.openFileLimit
+        runners[index].quietHours = desired.quietHours
+        saveConfiguration()
+        guard restart else { return nil }
+
+        // Don't interrupt a job; the change applies the next time the runner starts.
+        if let remote = try? await ghService.listRemoteRunners(for: runner.target),
+           remote.first(where: { $0.name == runner.name })?.busy == true {
+            return "restart deferred: a job is running (takes effect when the runner next starts)"
+        }
+        try await stopRunner(runner.id)
+        try await startRunner(runner.id)
+        return nil
+    }
+
+    /// Fail early, before anything is removed, if a runner couldn't be registered.
+    private func preflightRegistration(_ desired: DesiredRunner) async throws {
+        let auth = await ghService.validateAuth()
+        guard auth.isAuthenticated else { throw GHError.authFailed(auth.recoveryMessage) }
+        guard try await ghService.validateTarget(desired.target) else { throw RunnerError.invalidRepo }
+    }
+
+    private func addRunner(_ desired: DesiredRunner) async throws {
+        try await addRunner(
+            name: desired.name,
+            repo: desired.target.identifier,
+            scope: desired.target.scope,
+            labels: desired.labels,
+            isolationMode: desired.isolation,
+            enableGUI: desired.enableGUI,
+            openFileLimit: desired.openFileLimit
+        )
+        if let quietHours = desired.quietHours, let runner = runner(named: desired.name) {
+            setQuietHours(quietHours, for: runner.id)
+        }
     }
 
     // MARK: - Lookup
