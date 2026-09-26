@@ -18,9 +18,9 @@ Simple Mac menu bar app and CLI for managing GitHub Actions self-hosted runners.
 - 🔋 **Auto-pause**: pause runners on low battery or during quiet hours (per-runner schedules), finishing the current job first and resuming automatically
 - 📈 **Resource monitoring**: per-runner CPU, memory, and workspace size, with optional alerts (`mac-runner status --resources`)
 - 📜 **Log viewer**: live-tail, filter, and export runner output and diagnostics (`mac-runner logs <name> --follow`), with log rotation
-- 🪟 **Dashboard window**: every runner's status, current job, recent jobs, resources, and logs in one window
-- 🔔 **Job notifications**: native notifications when jobs start and finish, and an animated menu bar icon while they run
-- 📦 **Custom container images**: run Linux runners on any OCI image, each with its own virtual display when GUI access is on
+- 🪟 **Dashboard window**: every runner's status, resources, and logs in one window, plus the current job and recent jobs for repository runners
+- 🔔 **Job notifications**: native notifications when a repository runner's jobs start and finish, and an animated menu bar icon while any runner is executing
+- 📦 **Custom container images**: run Linux runners on your own OCI images (linux/arm64 with `bash`; see [Container Isolation](#3-container-isolation-macos-26-apple-silicon) for requirements), each with its own virtual display when GUI access is on
 - 🗂️ **Declarative config**: describe runners in `.mac-runner.yml` and `mac-runner apply` them (`mac-runner export` to start)
 
 ## Why?
@@ -351,7 +351,7 @@ Add Runner → Enable GUI Access (toggle)
 
 ## Roadmap
 
-Planned work and ideas are tracked in the [issue tracker](https://github.com/omniaura/mac-runner/issues?q=is%3Aopen+label%3Aenhancement), ordered by the `priority:high`, `priority:medium`, and `priority:low` labels. Open issues with a linked pull request are in progress. Suggestions are welcome: [open an issue](https://github.com/omniaura/mac-runner/issues/new).
+Planned work and ideas are tracked as [open enhancement issues](https://github.com/omniaura/mac-runner/issues?q=is%3Aopen+label%3Aenhancement). Their `priority:high`, `priority:medium`, and `priority:low` labels show priority (for example, [high-priority items](https://github.com/omniaura/mac-runner/issues?q=is%3Aopen+label%3Aenhancement+label%3Apriority%3Ahigh)). Open issues with a linked pull request are in progress. Suggestions are welcome: [open an issue](https://github.com/omniaura/mac-runner/issues/new).
 
 ## Architecture
 
