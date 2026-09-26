@@ -57,15 +57,19 @@ enum JobNotificationPayloadFactory {
 final class JobNotificationService: NSObject, @preconcurrency UNUserNotificationCenterDelegate {
     static let shared = JobNotificationService()
 
-    private let notificationCenter = UNUserNotificationCenter.current()
+    /// nil outside an app bundle (e.g. `swift run`, tests), where
+    /// UNUserNotificationCenter raises instead of returning a center.
+    private let notificationCenter: UNUserNotificationCenter? =
+        Bundle.main.bundleURL.pathExtension == "app" ? .current() : nil
     private var authorizationRequested = false
 
     func configure() {
-        notificationCenter.delegate = self
+        notificationCenter?.delegate = self
         requestAuthorizationIfNeededInternal()
     }
 
     func notify(event: JobNotificationEvent, runner: Runner, job: WorkflowJobSummary) async {
+        guard let notificationCenter else { return }
         requestAuthorizationIfNeeded()
 
         let payload = JobNotificationPayloadFactory.make(event: event, runner: runner, job: job)
@@ -107,7 +111,7 @@ final class JobNotificationService: NSObject, @preconcurrency UNUserNotification
         guard !authorizationRequested else { return }
         authorizationRequested = true
 
-        notificationCenter.requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+        notificationCenter?.requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
     }
 
     private func eventIdentifier(for event: JobNotificationEvent) -> String {
