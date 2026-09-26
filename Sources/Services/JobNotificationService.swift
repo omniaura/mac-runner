@@ -29,9 +29,11 @@ struct RecentJob: Sendable, Equatable, Identifiable {
         job.run.name.isEmpty ? job.name : "\(job.run.name) · \(job.name)"
     }
 
-    /// "success", "failure", ... once finished; "running" before that.
+    /// "running", then "pending" until GitHub reports the result, then its
+    /// conclusion ("success", "failure", ...).
     var outcome: String {
-        finishedAt == nil ? "running" : (job.conclusion ?? "completed")
+        guard finishedAt != nil else { return "running" }
+        return job.conclusion ?? "pending"
     }
 }
 

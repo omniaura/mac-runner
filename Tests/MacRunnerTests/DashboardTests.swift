@@ -36,6 +36,22 @@ final class DashboardTests: XCTestCase {
         XCTAssertEqual(history.first?.job.id, RunnerManager.recentJobLimit + 5)
     }
 
+    func testFinishedJobWithoutResultIsPendingNotFailed() {
+        let finished = RecentJob(job: job(1), startedAt: Date(), finishedAt: Date())
+        XCTAssertEqual(finished.outcome, "pending")
+        XCTAssertEqual(RunnerDetailView.icon(for: finished.outcome), "clock")
+
+        let resolved = RunnerManager.updatedJobHistory([finished], with: job(1, conclusion: "success"), finishedAt: nil, now: Date())
+        XCTAssertEqual(resolved.first?.outcome, "success", "a later result fills in the same entry")
+        XCTAssertEqual(resolved.first?.finishedAt, finished.finishedAt)
+    }
+
+    func testDecodesASingleJob() throws {
+        let run = WorkflowRunSummary(id: 5, name: "CI", htmlURL: URL(string: "https://github.com/o/r/actions/runs/5")!)
+        let decoded = try GHCLIService.decodeJob(Data(#"{"id": 9, "name": "build", "status": "completed", "conclusion": "success", "runner_name": "r"}"#.utf8), run: run)
+        XCTAssertEqual(decoded, WorkflowJobSummary(id: 9, name: "build", status: "completed", conclusion: "success", runnerName: "r", run: run))
+    }
+
     func testOutcomeStyling() {
         XCTAssertEqual(RunnerDetailView.icon(for: "success"), "checkmark.circle.fill")
         XCTAssertEqual(RunnerDetailView.icon(for: "failure"), "xmark.circle.fill")

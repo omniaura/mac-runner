@@ -605,6 +605,7 @@ class RunnerManager: ObservableObject {
         scheduledRestarts.removeValue(forKey: id)
         restartAttemptHistory.removeValue(forKey: id)
         pendingAutoPauses.removeValue(forKey: id)
+        recentJobs.removeValue(forKey: id)
 
         // Remove from list
         runners.removeAll(where: { $0.id == id })
@@ -1807,18 +1808,19 @@ class RunnerManager: ObservableObject {
         guard let activeJob = activeWorkflowJobs[runner.id] else { return }
         defer { activeWorkflowJobs.removeValue(forKey: runner.id) }
 
-        let completedJob: WorkflowJobSummary?
-        if runner.scope == .repo {
-            completedJob = try? await ghService.completedJob(
-                for: runner.repo,
-                runnerName: runner.name,
-                runID: activeJob.run.id
-            )
-        } else {
-            completedJob = nil
+        // Look up this exact job; its run may still be going (other jobs) and
+        // GitHub can take a moment to record the result.
+        var completedJob: WorkflowJobSummary?
+        if runner.scope == .repo,
+           let job = try? await ghService.job(for: runner.repo, id: activeJob.id, run: activeJob.run),
+           job.status == "completed" {
+            completedJob = job
         }
 
         recordJob(completedJob ?? activeJob, for: runner.id, finishedAt: Date())
+        if completedJob == nil && runner.scope == .repo {
+            refreshJobResultLater(activeJob, repo: runner.repo, runnerID: runner.id)
+        }
 
         if currentSettings.notificationsEnabled {
             await jobNotificationService.notify(
@@ -1830,6 +1832,21 @@ class RunnerManager: ObservableObject {
     }
 
     nonisolated static let recentJobLimit = 20
+
+    /// Fill in a finished job's result once GitHub reports it.
+    private func refreshJobResultLater(_ job: WorkflowJobSummary, repo: String, runnerID: UUID) {
+        Task { [weak self] in
+            for delay in [20, 60, 180] {
+                try? await Task.sleep(for: .seconds(delay))
+                guard let self else { return }
+                if let finished = try? await self.ghService.job(for: repo, id: job.id, run: job.run),
+                   finished.status == "completed" {
+                    self.recordJob(finished, for: runnerID)
+                    return
+                }
+            }
+        }
+    }
 
     private func recordJob(_ job: WorkflowJobSummary, for runnerID: UUID, finishedAt: Date? = nil) {
         recentJobs[runnerID] = Self.updatedJobHistory(

@@ -130,7 +130,8 @@ struct DashboardSummary: View {
                 SummaryCount(value: executing, label: "Executing", color: .orange)
                 SummaryCount(value: running - executing, label: "Idle", color: .green)
                 SummaryCount(value: paused, label: "Paused", color: .yellow)
-                SummaryCount(value: runners.count - running - paused, label: "Stopped", color: .gray)
+                SummaryCount(value: runners.filter { $0.status == .stopped }.count, label: "Stopped", color: .gray)
+                SummaryCount(value: runners.filter { $0.status == .error }.count, label: "Error", color: .red)
             }
             if !runnerManager.resourceUsage.isEmpty {
                 Text(runnerManager.totalResourceUsage.summary)
@@ -406,6 +407,7 @@ struct RunnerDetailView: View {
     static func icon(for outcome: String) -> String {
         switch outcome {
         case "running": return "circle.dotted"
+        case "pending": return "clock"
         case "success": return "checkmark.circle.fill"
         case "cancelled", "skipped": return "slash.circle"
         default: return "xmark.circle.fill"
@@ -416,7 +418,7 @@ struct RunnerDetailView: View {
         switch outcome {
         case "running": return .orange
         case "success": return .green
-        case "cancelled", "skipped": return .secondary
+        case "pending", "cancelled", "skipped": return .secondary
         default: return .red
         }
     }

@@ -110,12 +110,13 @@ struct LogViewerView: View {
             HStack(spacing: 10) {
                 Picker("Log", selection: $model.source) {
                     ForEach(RunnerLogs.Source.allCases) { source in
-                        Text(source.displayName).tag(source)
+                        Text(source.shortName).tag(source)
                     }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
+                .help("Output: the runner's output. Runner: its diagnostics log. Job: the newest job's diagnostics log.")
 
                 TextField("Filter", text: $model.query)
                     .textFieldStyle(.roundedBorder)
@@ -123,16 +124,17 @@ struct LogViewerView: View {
 
                 Toggle("Follow", isOn: $model.follow)
                     .toggleStyle(.checkbox)
+                    .fixedSize()
 
                 Button(action: model.copyToPasteboard) {
-                    Label("Copy", systemImage: "doc.on.doc")
+                    Image(systemName: "doc.on.doc")
                 }
                 .help("Copy the shown lines")
 
                 Button(action: model.export) {
-                    Label("Export…", systemImage: "square.and.arrow.up")
+                    Image(systemName: "square.and.arrow.up")
                 }
-                .help("Save the shown lines to a file")
+                .help("Export the shown lines to a file…")
 
                 Button(action: model.revealInFinder) {
                     Image(systemName: "folder")
