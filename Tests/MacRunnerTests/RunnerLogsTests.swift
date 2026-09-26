@@ -93,18 +93,68 @@ final class RunnerLogsTests: XCTestCase {
         XCTAssertEqual(follower.readNewLines(), ["replacement"])
     }
 
-    func testLatestDiagnosticsLogIsNewest() throws {
+    func testDiagnosticsSourcesPickNewestFileOfTheirKindByName() throws {
         let diag = directory.appendingPathComponent("_diag", isDirectory: true)
         try FileManager.default.createDirectory(at: diag, withIntermediateDirectories: true)
-        let older = diag.appendingPathComponent("Runner_20260101-000000-utc.log")
-        let newer = diag.appendingPathComponent("Worker_20260102-000000-utc.log")
-        try "a".write(to: older, atomically: true, encoding: .utf8)
-        try "b".write(to: newer, atomically: true, encoding: .utf8)
-        try "c".write(to: diag.appendingPathComponent("pages"), atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: older.path)
+        let names = ["Runner_20260101-000000-utc.log", "Runner_20260102-000000-utc.log",
+                     "Worker_20260102-010000-utc.log", "Worker_20260102-020000-utc.log", "pages"]
+        for name in names {
+            try "x".write(to: diag.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        // The older Runner_ log being written to most recently must not win.
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: diag.appendingPathComponent(names[0]).path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: diag.appendingPathComponent(names[1]).path)
 
-        XCTAssertEqual(RunnerLogs.latestDiagnosticsLogPath(runnerDirectory: directory.path), newer.path)
-        XCTAssertNil(RunnerLogs.latestDiagnosticsLogPath(runnerDirectory: path("nope")))
+        XCTAssertEqual(RunnerLogs.path(for: .diagnostics, runnerDirectory: directory.path), diag.appendingPathComponent(names[1]).path)
+        XCTAssertEqual(RunnerLogs.path(for: .jobDiagnostics, runnerDirectory: directory.path), diag.appendingPathComponent(names[3]).path)
+        XCTAssertEqual(RunnerLogs.path(for: .output, runnerDirectory: directory.path), path("runner.log"))
+        XCTAssertNil(RunnerLogs.path(for: .diagnostics, runnerDirectory: path("nope")))
+    }
+
+    func testPrunesOnlyOldDiagnosticsLogs() throws {
+        let diag = directory.appendingPathComponent("_diag", isDirectory: true)
+        try FileManager.default.createDirectory(at: diag, withIntermediateDirectories: true)
+        let old = diag.appendingPathComponent("Worker_old.log")
+        let fresh = diag.appendingPathComponent("Worker_new.log")
+        let other = diag.appendingPathComponent("keep.txt")
+        for url in [old, fresh, other] {
+            try "x".write(to: url, atomically: true, encoding: .utf8)
+        }
+        let tenDaysAgo = Date().addingTimeInterval(-10 * 86_400)
+        try FileManager.default.setAttributes([.modificationDate: tenDaysAgo], ofItemAtPath: old.path)
+        try FileManager.default.setAttributes([.modificationDate: tenDaysAgo], ofItemAtPath: other.path)
+
+        XCTAssertTrue(RunnerLogs.pruneDiagnostics(runnerDirectory: directory.path, days: 7))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: other.path))
+        XCTAssertTrue(RunnerLogs.pruneDiagnostics(runnerDirectory: path("no-runner-here")), "missing _diag is fine")
+    }
+
+    func testTailThenFollowMissesNothing() throws {
+        try write("a\nb\npartial", to: "runner.log")
+        let tail = RunnerLogs.tail(of: path("runner.log"), count: 10)
+        XCTAssertEqual(tail.lines, ["a", "b"], "a partial last line is left for the follower")
+
+        let handle = try RunnerLogs.openForAppending(path("runner.log"))
+        handle.write(Data(" line\nwritten between tail and follow\n".utf8))
+        try handle.close()
+
+        let follower = LogFollower(path: path("runner.log"), offset: tail.endOffset)
+        XCTAssertEqual(follower.readNewLines(), ["partial line", "written between tail and follow"])
+    }
+
+    func testFollowerKeepsUTF8CharactersSplitAcrossReads() throws {
+        let bytes = Array("café ✓\n".utf8)
+        let split = bytes.firstIndex(of: 0xC3)! + 1  // between the two bytes of "é"
+        let handle = try RunnerLogs.openForAppending(path("runner.log"))
+        let follower = LogFollower(path: path("runner.log"), offset: 0)
+
+        handle.write(Data(bytes[..<split]))
+        XCTAssertEqual(follower.readNewLines(), [])
+        handle.write(Data(bytes[split...]))
+        XCTAssertEqual(follower.readNewLines(), ["café ✓"])
+        try handle.close()
     }
 
     func testContainerLogWriterAppendsAndClosesOnce() throws {
@@ -123,6 +173,7 @@ final class RunnerLogsTests: XCTestCase {
             try LogsCommand.parse(["-f", "r", "-n", "200", "--diag"]).get(),
             LogsCommand(runnerName: "r", lines: 200, follow: true, source: .diagnostics)
         )
+        XCTAssertEqual(try LogsCommand.parse(["r", "--job"]).get().source, .jobDiagnostics)
         for args in [[], ["r", "-n", "0"], ["r", "--bogus"], ["a", "b"], ["r", "--lines"]] {
             if case .success = LogsCommand.parse(args) {
                 XCTFail("expected failure for \(args)")

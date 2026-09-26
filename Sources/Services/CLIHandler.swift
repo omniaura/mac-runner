@@ -156,7 +156,8 @@ enum CLIHandler {
         LOGS OPTIONS:
           -n, --lines <N>             Show the last N lines (default 50)
           -f, --follow                Keep printing new lines (Ctrl-C to stop)
-          --diag                      Show the newest _diag log instead of runner output
+          --diag                      Show the runner's diagnostics log (_diag/Runner_*)
+          --job                       Show the newest job's diagnostics log (_diag/Worker_*)
 
         SCHEDULE OPTIONS:
           --start HH:mm --end HH:mm   Pause runners daily in this window (may cross midnight)
@@ -506,31 +507,37 @@ enum CLIHandler {
             return
         }
 
-        guard var path = manager.logPath(for: runner, source: command.source),
-              FileManager.default.fileExists(atPath: path) else {
-            print(command.source == .diagnostics
-                ? "No diagnostics logs yet for '\(runner.name)'."
-                : "No logs yet for '\(runner.name)'.")
-            return
-        }
+        let what = command.source == .output ? "logs" : command.source.displayName.lowercased() + " logs"
+        var follower: LogFollower?
 
-        for line in RunnerLogs.lastLines(of: path, count: command.lines) {
-            print(line)
+        if let current = manager.logPath(for: runner, source: command.source),
+           FileManager.default.fileExists(atPath: current) {
+            let tail = RunnerLogs.tail(of: current, count: command.lines)
+            for line in tail.lines {
+                print(line)
+            }
+            follower = LogFollower(path: current, offset: tail.endOffset)
+        } else if command.follow {
+            print("No \(what) yet for '\(runner.name)'; waiting for them…")
+        } else {
+            print("No \(what) yet for '\(runner.name)'.")
+            return
         }
         guard command.follow else { return }
 
         setvbuf(stdout, nil, _IOLBF, 0)
-        var follower = LogFollower(path: path, startAtEnd: true)
         while !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(500))
-            // Diagnostics roll over to a new file when the runner restarts.
-            if command.source == .diagnostics,
-               let latest = manager.logPath(for: runner, source: .diagnostics), latest != path {
-                path = latest
-                print("==> \((path as NSString).lastPathComponent) <==")
-                follower = LogFollower(path: path, startAtEnd: false)
+            // Diagnostics start a new file each time the runner restarts or runs a job.
+            if let latest = manager.logPath(for: runner, source: command.source),
+               latest != follower?.path,
+               FileManager.default.fileExists(atPath: latest) {
+                if follower != nil {
+                    print("==> \((latest as NSString).lastPathComponent) <==")
+                }
+                follower = LogFollower(path: latest, offset: 0)
             }
-            for line in follower.readNewLines() {
+            for line in follower?.readNewLines() ?? [] {
                 print(line)
             }
         }
