@@ -1,3 +1,13 @@
+# [1.23.0](https://github.com/omniaura/mac-runner/compare/v1.22.0...v1.23.0) (2026-09-26)
+
+
+### Features
+
+* add a full dashboard window ([#89](https://github.com/omniaura/mac-runner/issues/89)) ([bd71fb7](https://github.com/omniaura/mac-runner/commit/bd71fb71a2bc6a043dfecc93c701145a4132ae34)), closes [#24](https://github.com/omniaura/mac-runner/issues/24)
+* declarative runner configuration with `mac-runner apply` and `export` ([#90](https://github.com/omniaura/mac-runner/issues/90)) ([d656592](https://github.com/omniaura/mac-runner/commit/d65659243238ee1a84f0a2fe66e87b12ee03e27a)), closes [#51](https://github.com/omniaura/mac-runner/issues/51)
+* make container isolation work, with custom images and tool provisioning ([#92](https://github.com/omniaura/mac-runner/issues/92)) ([3f700af](https://github.com/omniaura/mac-runner/commit/3f700af023a0c0daf3b70cc1d469d5ae429bace7)), closes [#44](https://github.com/omniaura/mac-runner/issues/44) [#44](https://github.com/omniaura/mac-runner/issues/44) [#39](https://github.com/omniaura/mac-runner/issues/39) [#44](https://github.com/omniaura/mac-runner/issues/44) [#39](https://github.com/omniaura/mac-runner/issues/39)
+* show per-runner CPU, memory, and disk usage ([#88](https://github.com/omniaura/mac-runner/issues/88)) ([a309cb9](https://github.com/omniaura/mac-runner/commit/a309cb927174e905630b61892ef8ea4773602496)), closes [#42](https://github.com/omniaura/mac-runner/issues/42)
+
 # [1.22.0](https://github.com/omniaura/mac-runner/compare/v1.21.0...v1.22.0) (2026-09-26)
 
 
