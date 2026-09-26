@@ -65,6 +65,12 @@ final class DeclarativeConfigTests: XCTestCase {
             ("runners:\n  - name: r\n    repo: o/r\n    quiet-hours: { start: '25:00', end: '01:00' }\n", "HH:mm"),
             ("runners:\n  - name: r\n    repo: o/r\n    quiet-hours: sometimes\n", "never"),
             ("runners:\n  - repo: o/r\n", "missing 'name'"),
+            ("version: 2\nrunners: []\n", "version 2 isn't supported"),
+            ("runner:\n  - name: r\n    repo: o/r\n", "unknown key 'runner'"),
+            ("runners:\n  - name: r\n    repo: o/r\n    labls: [x]\n", "unknown key 'labls' in runner 'r'"),
+            ("settings:\n  isolaton: user\nrunners: []\n", "unknown key 'isolaton' in settings"),
+            ("runners:\n  - name: r\n    org: team/sub\n", "no slashes"),
+            ("runners:\n  - name: r\n    repo: owner/\n", "owner/name"),
         ]
         for (yaml, expected) in invalid {
             do {
@@ -138,6 +144,37 @@ final class DeclarativeConfigTests: XCTestCase {
         let noPrune = ConfigPlanner.plan(desired: [want(keep)], desiredSettings: AppSettings(), current: [keep, stale],
                                          currentSettings: AppSettings(), prune: false)
         XCTAssertEqual(noPrune, [])
+    }
+
+    func testGlobalIsolationChangeReregistersInheritingRunners() {
+        let inherits = Runner(name: "inherits", repo: "o/r")
+        let pinned = Runner(name: "pinned", repo: "o/r", isolationMode: IsolationMode.none)
+        func want(_ runner: Runner, isolation: IsolationMode?) -> DesiredRunner {
+            DesiredRunner(name: runner.name, target: runner.target, labels: runner.labels, isolation: isolation,
+                          enableGUI: false, openFileLimit: nil, quietHours: nil)
+        }
+        var userGlobal = AppSettings()
+        userGlobal.isolationMode = .dedicatedUser(username: "_macrunner")
+
+        let plan = ConfigPlanner.plan(
+            desired: [want(inherits, isolation: nil), want(pinned, isolation: IsolationMode.none)],
+            desiredSettings: userGlobal,
+            current: [inherits, pinned],
+            currentSettings: AppSettings()
+        )
+        XCTAssertEqual(plan.count, 2)
+        guard case .recreate(let recreated, _, let reasons) = plan[1] else { return XCTFail("\(plan)") }
+        XCTAssertEqual(recreated.name, "inherits")
+        XCTAssertEqual(reasons, ["isolation none → user"])
+
+        // Pinning to the mode it already inherits changes nothing effective: update only.
+        let pinOnly = ConfigPlanner.plan(
+            desired: [want(inherits, isolation: IsolationMode.none)],
+            desiredSettings: AppSettings(), current: [inherits], currentSettings: AppSettings()
+        )
+        guard case .update(_, _, let changes, let restart) = pinOnly.first else { return XCTFail("\(pinOnly)") }
+        XCTAssertEqual(changes, ["isolation global → none"])
+        XCTAssertFalse(restart)
     }
 
     func testScheduleOnlyChangeDoesNotRestart() {

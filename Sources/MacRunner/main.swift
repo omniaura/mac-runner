@@ -17,7 +17,7 @@ if CommandLine.arguments.count > 1 {
     while sema.wait(timeout: .now()) == .timedOut {
         RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
     }
-    exit(0)
+    exit(MainActor.assumeIsolated { CLIHandler.exitCode })
 } else {
     // GUI mode
     MacRunnerApp.main()

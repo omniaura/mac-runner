@@ -1,6 +1,9 @@
 import Foundation
 
 enum CLIHandler {
+    /// Process exit status for the command that ran; commands set it on failure.
+    @MainActor static var exitCode: Int32 = 0
+
     static var version: String {
         version(executablePath: CommandLine.arguments.first)
     }
@@ -552,6 +555,7 @@ enum CLIHandler {
             case "-f", "--file":
                 guard i + 1 < args.count else {
                     print("Error: \(args[i]) requires a path")
+                    exitCode = 1
                     return
                 }
                 path = args[i + 1]
@@ -561,6 +565,7 @@ enum CLIHandler {
             case "--no-prune": prune = false; i += 1
             default:
                 print("Error: unknown option '\(args[i])'")
+                exitCode = 1
                 return
             }
         }
@@ -568,6 +573,7 @@ enum CLIHandler {
         let file = path ?? DeclarativeConfig.defaultPath()
         guard let text = try? String(contentsOfFile: file, encoding: .utf8) else {
             print("Error: can't read \(file). Create one with: mac-runner export -o .mac-runner.yml")
+            exitCode = 1
             return
         }
 
@@ -580,6 +586,7 @@ enum CLIHandler {
             desiredSettings = try config.resolvedSettings(manager.currentSettings)
         } catch {
             print("Error: \(error.localizedDescription)")
+            exitCode = 1
             return
         }
 
@@ -604,18 +611,21 @@ enum CLIHandler {
             print("\nThis removes or re-registers runners. Continue? [y/N] ", terminator: "")
             guard readLine()?.lowercased().hasPrefix("y") == true else {
                 print("Cancelled.")
+                exitCode = 1
                 return
             }
         }
 
-        let failures = await manager.apply(changes, settings: desiredSettings) { change, error in
-            if let error {
+        let failures = await manager.apply(changes, settings: desiredSettings) { change, outcome in
+            switch outcome {
+            case .applied(let note):
+                print("✓ \(change.summary)\(note.map { " — \($0)" } ?? "")")
+            case .failed(let error):
                 print("✗ \(change.summary): \(error.localizedDescription)")
-            } else {
-                print("✓ \(change.summary)")
             }
         }
         print(failures == 0 ? "Applied \(changes.count) change(s)." : "\(failures) of \(changes.count) change(s) failed.")
+        if failures > 0 { exitCode = 1 }
     }
 
     @MainActor
@@ -624,6 +634,7 @@ enum CLIHandler {
         if let index = args.firstIndex(where: { $0 == "-o" || $0 == "--output" }) {
             guard index + 1 < args.count else {
                 print("Error: \(args[index]) requires a path")
+                exitCode = 1
                 return
             }
             output = args[index + 1]
@@ -640,6 +651,7 @@ enum CLIHandler {
             }
         } catch {
             print("Error: \(error.localizedDescription)")
+            exitCode = 1
         }
     }
 

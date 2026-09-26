@@ -119,13 +119,42 @@ struct DeclarativeConfig: Codable, Equatable {
         return home.appendingPathComponent(".mac-runner/config.yml").path
     }
 
+    static let supportedVersion = 1
+
     static func parse(_ text: String) throws -> DeclarativeConfig {
         do {
-            return try YAMLDecoder().decode(DeclarativeConfig.self, from: text)
+            try rejectUnknownKeys(in: text)
+            let config = try YAMLDecoder().decode(DeclarativeConfig.self, from: text)
+            if let version = config.version, version != supportedVersion {
+                throw DeclarativeConfigError.invalid("version \(version) isn't supported (this Mac Runner reads version \(supportedVersion))")
+            }
+            return config
+        } catch let error as DeclarativeConfigError {
+            throw error
         } catch let error as DecodingError {
             throw DeclarativeConfigError.invalid(Self.describe(error))
         } catch {
             throw DeclarativeConfigError.invalid(error.localizedDescription)
+        }
+    }
+
+    /// Unknown keys are errors, so a typo or a newer format can't silently
+    /// read as "no runners" and prune everything.
+    private static func rejectUnknownKeys(in text: String) throws {
+        guard let root = try Yams.load(yaml: text) as? [String: Any] else { return }
+        func check(_ dictionary: [String: Any], allowed: Set<String>, context: String) throws {
+            if let unknown = dictionary.keys.filter({ !allowed.contains($0) }).sorted().first {
+                throw DeclarativeConfigError.invalid("unknown key '\(unknown)'\(context)")
+            }
+        }
+        try check(root, allowed: ["version", "settings", "runners"], context: "")
+        if let settings = root["settings"] as? [String: Any] {
+            try check(settings, allowed: ["isolation", "quiet-hours", "pause-on-battery", "battery-threshold"], context: " in settings")
+        }
+        for (index, runner) in ((root["runners"] as? [Any]) ?? []).enumerated() {
+            guard let runner = runner as? [String: Any] else { continue }
+            let name = (runner["name"] as? String).map { " '\($0)'" } ?? " #\(index + 1)"
+            try check(runner, allowed: ["name", "repo", "org", "labels", "isolation", "enable-gui", "open-files", "quiet-hours", "image", "count"], context: " in runner\(name)")
         }
     }
 
@@ -160,11 +189,15 @@ struct DeclarativeConfig: Codable, Equatable {
             let target: RunnerTarget
             switch (spec.repo, spec.org) {
             case let (repo?, nil):
-                guard repo.split(separator: "/").count == 2 else {
+                let parts = repo.split(separator: "/", omittingEmptySubsequences: false)
+                guard parts.count == 2, parts.allSatisfy({ !$0.trimmingCharacters(in: .whitespaces).isEmpty }) else {
                     throw DeclarativeConfigError.invalid("\(name): repo must be owner/name")
                 }
                 target = RunnerTarget(scope: .repo, identifier: repo)
             case let (nil, org?):
+                guard !org.trimmingCharacters(in: .whitespaces).isEmpty, !org.contains("/") else {
+                    throw DeclarativeConfigError.invalid("\(name): org must be an organization login (no slashes)")
+                }
                 target = RunnerTarget(scope: .org, identifier: org)
             default:
                 throw DeclarativeConfigError.invalid("\(name): set exactly one of repo or org")
@@ -290,6 +323,17 @@ enum DeclarativeConfigError: LocalizedError, Equatable {
     }
 }
 
+enum ConfigApplyError: LocalizedError {
+    case reregistrationFailed(name: String, underlying: Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .reregistrationFailed(let name, let underlying):
+            return "\(name) was removed but registering it again failed: \(underlying.localizedDescription). Run `mac-runner apply` again to retry."
+        }
+    }
+}
+
 /// One runner the config file asks for.
 struct DesiredRunner: Equatable {
     var name: String
@@ -360,8 +404,12 @@ enum ConfigPlanner {
             var reregister: [String] = []
             if have.target != want.target { reregister.append("target \(have.target.displayName) → \(want.target.displayName)") }
             if have.labels != want.labels { reregister.append("labels [\(have.labels.joined(separator: ", "))] → [\(want.labels.joined(separator: ", "))]") }
-            if have.isolationMode != want.isolation {
-                reregister.append("isolation \(DeclarativeConfig.isolationName(have.isolationMode) ?? "global") → \(DeclarativeConfig.isolationName(want.isolation) ?? "global")")
+            // What matters is the isolation the runner actually uses: a change to
+            // the global mode re-registers runners that inherit it.
+            let haveIsolation = have.effectiveIsolationMode(global: currentSettings.isolationMode)
+            let wantIsolation = want.isolation ?? desiredSettings.isolationMode
+            if haveIsolation != wantIsolation {
+                reregister.append("isolation \(DeclarativeConfig.isolationName(haveIsolation) ?? "none") → \(DeclarativeConfig.isolationName(wantIsolation) ?? "none")")
             }
             if !reregister.isEmpty {
                 changes.append(.recreate(have, want, reasons: reregister))
@@ -370,6 +418,10 @@ enum ConfigPlanner {
 
             var updates: [String] = []
             var restart = false
+            if have.isolationMode != want.isolation {
+                // Same effective isolation, only whether it's pinned or inherited changed.
+                updates.append("isolation \(DeclarativeConfig.isolationName(have.isolationMode) ?? "global") → \(DeclarativeConfig.isolationName(want.isolation) ?? "global")")
+            }
             if have.enableGUI != want.enableGUI {
                 updates.append(want.enableGUI ? "enable GUI" : "disable GUI")
                 restart = true
