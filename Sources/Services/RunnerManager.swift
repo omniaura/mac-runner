@@ -732,6 +732,8 @@ class RunnerManager: ObservableObject {
             }
         }
 
+        // A freshly started runner hasn't picked up a job yet.
+        runners[index].busy = false
         runners[index].status = .running
         saveConfiguration()
     }
