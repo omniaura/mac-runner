@@ -337,7 +337,10 @@ mac-runner add owner/repo --enable-gui
 Add Runner → Enable GUI Access (toggle)
 ```
 
-**Note:** GUI sessions are currently shared across runners. For full isolation (separate GUI session per runner), see [Issue #27](https://github.com/omniaura/mac-runner/issues/27).
+### Separate displays per runner
+
+- **Container runners** with GUI access each get their **own virtual display**: Xvfb runs inside the runner's VM (1920×1080×24) and `DISPLAY` is set for its jobs, so windows, focus, and screenshots from one runner never touch another's. Linux GUI tests (headed browsers, Electron, X11 apps) run side by side without interfering. Headless container runners get `CI=true HEADLESS=true` like other modes.
+- **macOS runners** (no isolation or a dedicated user) with GUI access share the logged-in user's desktop. macOS only gives a user a separate GUI session when that user actually logs in at the login window, and the dedicated `_macrunner` user has no password by design, so Mac Runner can't create one. For parallel macOS UI tests, either keep one GUI-enabled runner per Mac (target it with a label) or run Mac Runner inside separate macOS VMs, each with its own GUI-enabled runner.
 
 ## Planned Features
 

@@ -736,6 +736,7 @@ class RunnerManager: ObservableObject {
                     runnerName: runner.name,
                     labels: runner.labels,
                     tools: runner.containerTools ?? [],
+                    enableGUI: runner.enableGUI,
                     runnerDownloadURL: RunnerInstaller.linuxDownloadURL(version: runnerVersion),
                     openFileLimit: runner.effectiveOpenFileLimit(global: currentSettings.openFileLimit),
                     logWriter: try {
