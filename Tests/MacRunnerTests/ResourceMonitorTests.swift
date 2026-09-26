@@ -64,18 +64,44 @@ final class ResourceMonitorTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         try Data(count: 2 * 1_048_576).write(to: directory.appendingPathComponent("blob"))
 
-        XCTAssertGreaterThanOrEqual(ResourceMonitor.directorySize(directory.path) ?? 0, 2 * 1_048_576)
+        let measured = try XCTUnwrap(ResourceMonitor.directorySize(directory.path))
+        XCTAssertGreaterThanOrEqual(measured.bytes, 2 * 1_048_576)
+        XCTAssertTrue(measured.isComplete)
         XCTAssertNil(ResourceMonitor.directorySize(directory.appendingPathComponent("missing").path))
     }
 
     func testAlertThresholds() {
         let usage = RunnerResourceUsage(cpuPercent: 450, memoryBytes: 20 * 1_073_741_824, processCount: 1)
-        XCTAssertEqual(ResourceAlertSettings.default.exceeded(by: usage), [], "disabled by default")
+        XCTAssertEqual(ResourceAlertSettings.default.exceeded(by: usage), [:], "disabled by default")
 
         var alerts = ResourceAlertSettings(enabled: true, cpuPercent: 400, memoryGB: 16)
-        XCTAssertEqual(alerts.exceeded(by: usage).count, 2)
+        XCTAssertEqual(Set(alerts.exceeded(by: usage).keys), [.cpu, .memory])
         alerts.memoryGB = 32
-        XCTAssertEqual(alerts.exceeded(by: usage), ["CPU 450% (limit 400%)"])
+        XCTAssertEqual(alerts.exceeded(by: usage), [.cpu: "CPU 450% (limit 400%)"])
+    }
+
+    func testNegativeLimitsAreClampedInsteadOfCrashing() throws {
+        let decoded = try JSONDecoder().decode(
+            ResourceAlertSettings.self,
+            from: Data(#"{"enabled": true, "cpuPercent": -5, "memoryGB": -3}"#.utf8)
+        )
+        XCTAssertEqual(decoded.cpuPercent, 1)
+        XCTAssertEqual(decoded.memoryGB, 1)
+        XCTAssertEqual(Set(decoded.exceeded(by: RunnerResourceUsage(cpuPercent: 5, memoryBytes: 2_147_483_648, processCount: 1)).keys), [.cpu, .memory])
+    }
+
+    func testPartialDiskTotalsAreMarked() {
+        var usage = RunnerResourceUsage(cpuPercent: 0, memoryBytes: 0, processCount: 1, diskBytes: 1_000_000)
+        usage.diskIsPartial = true
+        XCTAssertTrue(usage.diskText?.hasPrefix("≥ ") == true)
+        XCTAssertTrue(RunnerResourceUsage.total([usage]).diskIsPartial)
+    }
+
+    func testTimeoutStopsAHungProcess() throws {
+        let start = Date()
+        XCTAssertNil(try ProcessExecutor.run("/bin/sleep", arguments: ["30"], timeout: 0.5))
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5)
+        XCTAssertEqual(try ProcessExecutor.run("/bin/echo", arguments: ["hi"], timeout: 5)?.output, "hi\n")
     }
 
     func testSettingsDecodeWithoutResourceAlerts() throws {
@@ -89,16 +115,18 @@ final class ResourceMonitorTests: XCTestCase {
         let a = Runner(name: "alpha", repo: "o/r", status: .running)
         let b = Runner(name: "b", repo: "o/r", status: .running)
         let stopped = Runner(name: "stopped", repo: "o/r")
-        let table = CLIHandler.resourceTable(runners: [b, stopped, a], usage: [
+        let elsewhere = Runner(name: "ctr", repo: "o/r", status: .running)
+        let table = CLIHandler.resourceTable(runners: [b, stopped, a, elsewhere], usage: [
             a.id: RunnerResourceUsage(cpuPercent: 5, memoryBytes: 1_048_576, processCount: 3, diskBytes: nil),
             b.id: RunnerResourceUsage(cpuPercent: 20, memoryBytes: 2_097_152, processCount: 4, diskBytes: 1_000_000),
         ])
         let lines = table.split(separator: "\n").map(String.init)
-        XCTAssertEqual(lines.count, 4)
+        XCTAssertEqual(lines.count, 5)
         XCTAssertTrue(lines[0].hasPrefix("NAME "))
         XCTAssertTrue(lines[1].hasPrefix("alpha"))
-        XCTAssertTrue(lines[3].hasPrefix("TOTAL"))
-        XCTAssertTrue(lines[3].contains("25%"))
+        XCTAssertTrue(lines[3].hasPrefix("ctr "), "running without a sample still listed")
+        XCTAssertTrue(lines[4].hasPrefix("TOTAL"))
+        XCTAssertTrue(lines[4].contains("25%"))
         XCTAssertFalse(table.contains("stopped"))
         XCTAssertEqual(CLIHandler.resourceTable(runners: [stopped], usage: [:]), "No running runners.")
     }

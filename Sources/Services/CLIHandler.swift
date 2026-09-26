@@ -470,12 +470,16 @@ enum CLIHandler {
 
     /// `mac-runner status --resources` output.
     static func resourceTable(runners: [Runner], usage: [UUID: RunnerResourceUsage]) -> String {
-        let running = runners.filter { usage[$0.id] != nil }.sorted { $0.name < $1.name }
+        let running = runners.filter { $0.status == .running || usage[$0.id] != nil }.sorted { $0.name < $1.name }
         guard !running.isEmpty else { return "No running runners." }
 
         var rows = [["NAME", "CPU", "MEMORY", "DISK", "PROCS"]]
         for runner in running {
-            let item = usage[runner.id] ?? .zero
+            guard let item = usage[runner.id] else {
+                // e.g. a container runner whose VM lives in another Mac Runner process.
+                rows.append([runner.name, "-", "-", "-", "-"])
+                continue
+            }
             rows.append([runner.name, item.cpuText, item.memoryText, item.diskText ?? "-", "\(item.processCount)"])
         }
         let total = RunnerResourceUsage.total(running.compactMap { usage[$0.id] })

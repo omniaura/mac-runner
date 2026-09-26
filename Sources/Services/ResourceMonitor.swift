@@ -8,6 +8,8 @@ struct RunnerResourceUsage: Sendable, Equatable {
     var processCount: Int
     /// Size of the runner workspace; nil until measured (it's sampled less often).
     var diskBytes: UInt64?
+    /// Some of the workspace couldn't be read, so `diskBytes` is a lower bound.
+    var diskIsPartial = false
 
     static let zero = RunnerResourceUsage(cpuPercent: 0, memoryBytes: 0, processCount: 0, diskBytes: nil)
 
@@ -18,6 +20,7 @@ struct RunnerResourceUsage: Sendable, Equatable {
             total.processCount += usage.processCount
             if let disk = usage.diskBytes {
                 total.diskBytes = (total.diskBytes ?? 0) + disk
+                total.diskIsPartial = total.diskIsPartial || usage.diskIsPartial
             }
         }
     }
@@ -31,7 +34,9 @@ struct RunnerResourceUsage: Sendable, Equatable {
     }
 
     var diskText: String? {
-        diskBytes.map { ByteCountFormatter.string(fromByteCount: Int64(clamping: $0), countStyle: .file) }
+        diskBytes.map {
+            (diskIsPartial ? "≥ " : "") + ByteCountFormatter.string(fromByteCount: Int64(clamping: $0), countStyle: .file)
+        }
     }
 
     /// e.g. "CPU 12% · 340 MB · Disk 2.1 GB"
@@ -68,7 +73,7 @@ enum ResourceMonitor {
         guard !pids.isEmpty else { return [:] }
         let list = pids.map(String.init).joined(separator: ",")
         // ps exits 1 when some pids have already exited; the rest are still printed.
-        guard let result = try? ProcessExecutor.run("/bin/ps", arguments: ["-o", "pid=,%cpu=,rss=", "-p", list]) else {
+        guard let result = try? ProcessExecutor.run("/bin/ps", arguments: ["-o", "pid=,%cpu=,rss=", "-p", list], timeout: 10) else {
             return [:]
         }
         return parsePSOutput(result.output)
@@ -89,13 +94,20 @@ enum ResourceMonitor {
         )
     }
 
-    /// Workspace size in bytes via `du -sk` (unreadable subdirectories are skipped).
-    static func directorySize(_ path: String) -> UInt64? {
+    struct DiskMeasurement: Equatable, Sendable {
+        var bytes: UInt64
+        /// False when `du` couldn't read part of the tree (the total is a lower bound).
+        var isComplete: Bool
+    }
+
+    /// Workspace size via `du -sk`, giving up after `timeout` seconds.
+    static func directorySize(_ path: String, timeout: TimeInterval = 120) -> DiskMeasurement? {
         guard FileManager.default.fileExists(atPath: path),
-              let result = try? ProcessExecutor.run("/usr/bin/du", arguments: ["-sk", path]) else {
+              let result = try? ProcessExecutor.run("/usr/bin/du", arguments: ["-sk", path], timeout: timeout),
+              let bytes = parseDUOutput(result.output) else {
             return nil
         }
-        return parseDUOutput(result.output)
+        return DiskMeasurement(bytes: bytes, isComplete: result.succeeded)
     }
 
     static func parseDUOutput(_ output: String) -> UInt64? {
@@ -118,20 +130,44 @@ enum ResourceMonitor {
 struct ResourceAlertSettings: Codable, Sendable, Equatable {
     var enabled: Bool
     /// Total CPU across runners, 100 = one core.
-    var cpuPercent: Int
-    var memoryGB: Int
+    var cpuPercent: Int {
+        didSet { cpuPercent = max(1, cpuPercent) }
+    }
+    var memoryGB: Int {
+        didSet { memoryGB = max(1, memoryGB) }
+    }
 
     static let `default` = ResourceAlertSettings(enabled: false, cpuPercent: 400, memoryGB: 16)
 
-    func exceeded(by total: RunnerResourceUsage) -> [String] {
-        guard enabled else { return [] }
-        var reasons: [String] = []
-        if total.cpuPercent > Double(cpuPercent) {
-            reasons.append("CPU \(total.cpuText) (limit \(cpuPercent)%)")
+    init(enabled: Bool, cpuPercent: Int, memoryGB: Int) {
+        self.enabled = enabled
+        self.cpuPercent = max(1, cpuPercent)
+        self.memoryGB = max(1, memoryGB)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            enabled: try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false,
+            cpuPercent: try container.decodeIfPresent(Int.self, forKey: .cpuPercent) ?? Self.default.cpuPercent,
+            memoryGB: try container.decodeIfPresent(Int.self, forKey: .memoryGB) ?? Self.default.memoryGB
+        )
+    }
+
+    enum Limit: String, Sendable, CaseIterable {
+        case cpu, memory
+    }
+
+    /// Limits `total` is over, with a description of each.
+    func exceeded(by total: RunnerResourceUsage) -> [Limit: String] {
+        guard enabled else { return [:] }
+        var over: [Limit: String] = [:]
+        if total.cpuPercent > Double(max(1, cpuPercent)) {
+            over[.cpu] = "CPU \(total.cpuText) (limit \(cpuPercent)%)"
         }
-        if total.memoryBytes > UInt64(memoryGB) * 1_073_741_824 {
-            reasons.append("memory \(total.memoryText) (limit \(memoryGB) GB)")
+        if total.memoryBytes > UInt64(max(1, memoryGB)) * 1_073_741_824 {
+            over[.memory] = "memory \(total.memoryText) (limit \(memoryGB) GB)"
         }
-        return reasons
+        return over
     }
 }
