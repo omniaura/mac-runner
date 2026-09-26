@@ -207,33 +207,87 @@ final class AutoPauseCommandTests: XCTestCase {
 }
 
 final class ExternalConfigMergeTests: XCTestCase {
-    func testDiskWinsForConfigurationMemoryKeepsRuntimeState() {
-        let id = UUID()
-        var memory = Runner(id: id, name: "old", repo: "o/r", status: .running, busy: true, lastRestartEvent: "restarted")
-        memory.githubRunnerId = 7
-        let disk = Runner(
-            id: id, name: "new", repo: "o/r", labels: ["x"], status: .stopped,
-            quietHours: QuietHours(enabled: true, start: "01:00", end: "02:00")
-        )
-        let added = Runner(name: "cli-added", repo: "o/r", status: .running)
-        let removed = Runner(name: "cli-removed", repo: "o/r")
+    private let settings = AppSettings()
 
-        let merged = RunnerManager.merge(diskRunners: [disk, added], into: [memory, removed], ownedRuntimeIDs: [id])
-
-        XCTAssertEqual(merged.map(\.name), ["new", "cli-added"])
-        XCTAssertEqual(merged[0].labels, ["x"])
-        XCTAssertEqual(merged[0].quietHours, disk.quietHours)
-        XCTAssertEqual(merged[0].status, .running, "we own this runner's process")
-        XCTAssertTrue(merged[0].busy)
-        XCTAssertEqual(merged[0].githubRunnerId, 7)
-        XCTAssertEqual(merged[0].lastRestartEvent, "restarted")
-        XCTAssertEqual(merged[1].status, .running)
+    private func config(_ runners: [Runner], _ settings: AppSettings? = nil) -> RunnerConfig {
+        RunnerConfig(runners: runners, settings: settings ?? self.settings)
     }
 
-    func testStatusComesFromDiskForRunnersWeDontOwn() {
-        let id = UUID()
-        let memory = Runner(id: id, name: "r", repo: "o/r", status: .running)
-        let disk = Runner(id: id, name: "r", repo: "o/r", status: .stopped)
-        XCTAssertEqual(RunnerManager.merge(diskRunners: [disk], into: [memory], ownedRuntimeIDs: []).first?.status, .stopped)
+    func testExternalEditsAreTakenWhenWeChangedNothing() {
+        let runner = Runner(name: "r", repo: "o/r", status: .running, busy: true, lastRestartEvent: "restarted")
+        var edited = runner
+        edited.labels = ["x"]
+        edited.quietHours = QuietHours(enabled: true, start: "01:00", end: "02:00")
+        let externalSettings = AppSettings(pauseOnBattery: true)
+
+        let merged = RunnerManager.reconcile(
+            disk: config([edited], externalSettings), memory: config([runner]), base: config([runner]), ownedRuntimeIDs: []
+        )
+
+        XCTAssertEqual(merged.settings, externalSettings)
+        XCTAssertEqual(merged.runners[0].labels, ["x"])
+        XCTAssertEqual(merged.runners[0].quietHours, edited.quietHours)
+        XCTAssertTrue(merged.runners[0].busy, "runtime-only fields stay ours")
+        XCTAssertEqual(merged.runners[0].lastRestartEvent, "restarted")
+    }
+
+    func testOurUnsavedEditsSurviveAConcurrentExternalSave() {
+        let a = Runner(name: "a", repo: "o/r")
+        let b = Runner(name: "b", repo: "o/r")
+        let base = config([a, b])
+
+        // We: changed settings, renamed a, removed b, added c.
+        var ourA = a
+        ourA.quietHours = QuietHours(enabled: false, start: "00:00", end: "00:00")
+        let c = Runner(name: "c", repo: "o/r")
+        let ourSettings = AppSettings(batteryPauseThreshold: 40)
+        // CLI: changed b's labels, added d.
+        var cliB = b
+        cliB.labels = ["cli"]
+        let d = Runner(name: "d", repo: "o/r")
+
+        let merged = RunnerManager.reconcile(
+            disk: config([a, cliB, d]), memory: config([ourA, c], ourSettings), base: base, ownedRuntimeIDs: []
+        )
+
+        XCTAssertEqual(merged.settings, ourSettings)
+        XCTAssertEqual(merged.runners.map(\.name), ["a", "d", "c"], "b stays removed; c and d both kept")
+        XCTAssertEqual(merged.runners[0].quietHours, ourA.quietHours)
+    }
+
+    func testRunnersRemovedElsewhereDisappear() {
+        let a = Runner(name: "a", repo: "o/r")
+        let b = Runner(name: "b", repo: "o/r")
+        let merged = RunnerManager.reconcile(disk: config([a]), memory: config([a, b]), base: config([a, b]), ownedRuntimeIDs: [])
+        XCTAssertEqual(merged.runners.map(\.name), ["a"])
+    }
+
+    func testRunStateComesFromDiskUnlessWeOwnOrChangedIt() {
+        let paused = Runner(name: "r", repo: "o/r", status: .paused, autoPauseReason: .quietHours)
+        var startedByCLI = paused
+        startedByCLI.status = .running
+        startedByCLI.autoPauseReason = nil
+        startedByCLI.autoPauseOverride = .quietHours
+
+        let fromCLI = RunnerManager.reconcile(disk: config([startedByCLI]), memory: config([paused]), base: config([paused]), ownedRuntimeIDs: [])
+        XCTAssertEqual(fromCLI.runners[0].status, .running)
+        XCTAssertEqual(fromCLI.runners[0].autoPauseOverride, .quietHours, "a CLI manual start's override carries over")
+
+        let owned = RunnerManager.reconcile(disk: config([startedByCLI]), memory: config([paused]), base: config([paused]), ownedRuntimeIDs: [paused.id])
+        XCTAssertEqual(owned.runners[0].status, .paused)
+
+        var pausedHere = startedByCLI
+        pausedHere.status = .paused
+        pausedHere.autoPauseReason = .lowBattery
+        pausedHere.autoPauseOverride = nil
+        let local = RunnerManager.reconcile(disk: config([paused]), memory: config([pausedHere]), base: config([startedByCLI]), ownedRuntimeIDs: [])
+        XCTAssertEqual(local.runners[0].autoPauseReason, .lowBattery, "our state change since the last save wins")
+    }
+
+    func testOverrideDecodesAndDefaultsToNil() throws {
+        var runner = Runner(name: "r", repo: "o/r")
+        XCTAssertNil(try JSONDecoder().decode(Runner.self, from: JSONEncoder().encode(runner)).autoPauseOverride)
+        runner.autoPauseOverride = .quietHours
+        XCTAssertEqual(try JSONDecoder().decode(Runner.self, from: JSONEncoder().encode(runner)).autoPauseOverride, .quietHours)
     }
 }

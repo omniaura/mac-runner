@@ -15,7 +15,7 @@ enum RunnerScope: String, Codable, Sendable {
     }
 }
 
-struct Runner: Identifiable, Codable, Sendable {
+struct Runner: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
     var name: String
     /// Target identifier. For `.repo` scope this is "owner/repo"; for `.org` scope this is the org login.
@@ -34,6 +34,9 @@ struct Runner: Identifiable, Codable, Sendable {
     var openFileLimit: Int?  // Per-runner override for max open files (nil = use global setting)
     var quietHours: QuietHours?  // Per-runner pause schedule (nil = use global setting)
     var autoPauseReason: AutoPauseReason?  // Set while Mac Runner has paused this runner automatically
+    /// Set when the runner was started by hand while paused for this reason; it
+    /// keeps running until that condition clears. Persisted so a CLI start holds too.
+    var autoPauseOverride: AutoPauseReason?
 
     init(
         id: UUID = UUID(),
@@ -93,6 +96,59 @@ struct Runner: Identifiable, Codable, Sendable {
         )
         quietHours = try container.decodeIfPresent(QuietHours.self, forKey: .quietHours)
         autoPauseReason = try container.decodeIfPresent(AutoPauseReason.self, forKey: .autoPauseReason)
+        autoPauseOverride = try container.decodeIfPresent(AutoPauseReason.self, forKey: .autoPauseOverride)
+    }
+
+    /// User-editable settings, compared when reconciling concurrent config edits.
+    struct Configuration: Equatable {
+        var name: String
+        var repo: String
+        var scope: RunnerScope
+        var labels: [String]
+        var enabled: Bool
+        var githubRunnerId: Int?
+        var isolationMode: IsolationMode?
+        var enableGUI: Bool
+        var openFileLimit: Int?
+        var quietHours: QuietHours?
+    }
+
+    var configuration: Configuration {
+        get {
+            Configuration(
+                name: name, repo: repo, scope: scope, labels: labels, enabled: enabled,
+                githubRunnerId: githubRunnerId, isolationMode: isolationMode, enableGUI: enableGUI,
+                openFileLimit: openFileLimit, quietHours: quietHours
+            )
+        }
+        set {
+            name = newValue.name
+            repo = newValue.repo
+            scope = newValue.scope
+            labels = newValue.labels
+            enabled = newValue.enabled
+            githubRunnerId = newValue.githubRunnerId
+            isolationMode = newValue.isolationMode
+            enableGUI = newValue.enableGUI
+            openFileLimit = newValue.openFileLimit
+            quietHours = newValue.quietHours
+        }
+    }
+
+    /// Persisted run state, compared when reconciling concurrent config edits.
+    struct PersistedState: Equatable {
+        var status: RunnerStatus
+        var autoPauseReason: AutoPauseReason?
+        var autoPauseOverride: AutoPauseReason?
+    }
+
+    var persistedState: PersistedState {
+        get { PersistedState(status: status, autoPauseReason: autoPauseReason, autoPauseOverride: autoPauseOverride) }
+        set {
+            status = newValue.status
+            autoPauseReason = newValue.autoPauseReason
+            autoPauseOverride = newValue.autoPauseOverride
+        }
     }
 
     /// Convenience target descriptor pairing this runner's scope and identifier.
@@ -179,7 +235,7 @@ enum RunnerStatus: String, Codable, Sendable {
     }
 }
 
-struct RunnerConfig: Codable, Sendable {
+struct RunnerConfig: Codable, Sendable, Equatable {
     var runners: [Runner]
     var settings: AppSettings
 
@@ -252,7 +308,7 @@ enum IsolationMode: Codable, Sendable, Equatable {
     }
 }
 
-struct AppSettings: Codable, Sendable {
+struct AppSettings: Codable, Sendable, Equatable {
     var startOnLogin: Bool
     var pauseOnBattery: Bool
     /// Battery percentage below which runners pause when `pauseOnBattery` is on.

@@ -80,10 +80,10 @@ class RunnerManager: ObservableObject {
     /// commands also construct a RunnerManager and must not.
     private var automationEnabled = false
     private var isEvaluatingAutoPause = false
-    /// Runners started by hand while an auto-pause condition applied. Left
-    /// running until that condition clears.
-    private var autoPauseOverrides: Set<UUID> = []
     private var lastConfigModificationDate: Date?
+    /// The config as last read from or written to disk: the common ancestor
+    /// when reconciling our changes with another process's (the CLI's).
+    private var lastPersistedConfig: RunnerConfig?
     private var powerSourceObserver: NSObjectProtocol?
 
     /// Initialize the RunnerManager and restore runtime state.
@@ -204,6 +204,7 @@ class RunnerManager: ObservableObject {
             runners = config.runners
             currentSettings = config.settings
             lastConfigModificationDate = configService.modificationDate()
+            lastPersistedConfig = config
         } catch {
             self.error = "Failed to load config: \(error.localizedDescription)"
         }
@@ -215,9 +216,13 @@ class RunnerManager: ObservableObject {
     /// If saving fails, sets the error property with details.
     func saveConfiguration() {
         do {
+            // Fold in anything another process wrote since we last read, so
+            // this save can't overwrite it.
+            reloadExternalConfigChanges()
             let config = RunnerConfig(runners: runners, settings: currentSettings)
             try configService.saveConfig(config)
             lastConfigModificationDate = configService.modificationDate()
+            lastPersistedConfig = config
         } catch {
             self.error = "Failed to save config: \(error.localizedDescription)"
         }
@@ -589,7 +594,6 @@ class RunnerManager: ObservableObject {
         scheduledRestarts.removeValue(forKey: id)
         restartAttemptHistory.removeValue(forKey: id)
         pendingAutoPauses.removeValue(forKey: id)
-        autoPauseOverrides.remove(id)
 
         // Remove from list
         runners.removeAll(where: { $0.id == id })
@@ -752,10 +756,10 @@ class RunnerManager: ObservableObject {
 
         // A freshly started runner hasn't picked up a job yet.
         runners[index].busy = false
-        if runners[index].autoPauseReason != nil {
-            // Started by hand while auto-paused: keep it running until the
-            // pause condition clears instead of pausing it again next tick.
-            autoPauseOverrides.insert(id)
+        if let reason = runners[index].autoPauseReason {
+            // Started by hand while auto-paused: keep it running until this
+            // condition clears instead of pausing it again next tick.
+            runners[index].autoPauseOverride = reason
             runners[index].autoPauseReason = nil
         }
         runners[index].status = .running
@@ -822,6 +826,7 @@ class RunnerManager: ObservableObject {
         launchTokens.removeValue(forKey: id)
 
         runners[index].status = .stopped
+        runners[index].autoPauseOverride = nil
         // A stopped runner isn't executing anything; don't let a stale flag
         // show job activity after it restarts.
         runners[index].busy = false
@@ -894,8 +899,11 @@ class RunnerManager: ObservableObject {
             let reason = AutoPausePolicy.reason(for: runner, settings: currentSettings, power: powerState, now: now)
 
             guard let reason else {
-                autoPauseOverrides.remove(id)
                 pendingAutoPauses.removeValue(forKey: id)
+                if runner.autoPauseOverride != nil, let index = runners.firstIndex(where: { $0.id == id }) {
+                    runners[index].autoPauseOverride = nil
+                    saveConfiguration()
+                }
                 guard runner.status == .paused, runner.autoPauseReason != nil else { continue }
                 if await resumeAutoPausedRunner(id) {
                     resumed.append(runner.name)
@@ -903,7 +911,15 @@ class RunnerManager: ObservableObject {
                 continue
             }
 
-            if autoPauseOverrides.contains(id) || runner.status != .running {
+            // A manual start overrides only the condition it was paused for;
+            // a different one (e.g. low battery during quiet hours) still applies.
+            if let override = runner.autoPauseOverride, override != reason,
+               let index = runners.firstIndex(where: { $0.id == id }) {
+                runners[index].autoPauseOverride = nil
+                saveConfiguration()
+            }
+
+            if runners.first(where: { $0.id == id })?.autoPauseOverride == reason || runner.status != .running {
                 pendingAutoPauses.removeValue(forKey: id)
                 if runner.status == .paused, let current = runner.autoPauseReason, current != reason,
                    let index = runners.firstIndex(where: { $0.id == id }) {
@@ -1016,8 +1032,8 @@ class RunnerManager: ObservableObject {
         if let reason = pendingAutoPauses[runner.id] {
             return "Pausing for \(reason.displayName) after the current job"
         }
-        if runner.status == .running, autoPauseOverrides.contains(runner.id) {
-            return "Running during \(AutoPausePolicy.reason(for: runner, settings: currentSettings, power: powerState, now: now)?.displayName ?? "pause window") (started manually)"
+        if runner.status == .running, let override = runner.autoPauseOverride {
+            return "Running during \(override.displayName) (started manually)"
         }
         return nil
     }
@@ -1048,46 +1064,82 @@ class RunnerManager: ObservableObject {
 
     // MARK: - External Config Changes
 
-    /// Pick up settings and runner edits another process (the CLI) wrote to the
-    /// config file since we last read or wrote it. Runtime state we own
-    /// (processes, busy flags, restart events) is kept.
+    /// Fold in edits another process (the CLI) wrote to the config file since
+    /// we last read or wrote it, keeping our own unsaved changes.
     func reloadExternalConfigChanges() {
         guard let modified = configService.modificationDate(),
               modified != lastConfigModificationDate,
-              let config = try? configService.loadConfig() else {
+              let disk = try? configService.loadConfig() else {
             return
         }
         lastConfigModificationDate = modified
-        currentSettings = config.settings
-        runners = Self.merge(
-            diskRunners: config.runners,
-            into: runners,
+
+        let memory = RunnerConfig(runners: runners, settings: currentSettings)
+        let merged = Self.reconcile(
+            disk: disk,
+            memory: memory,
+            base: lastPersistedConfig,
             ownedRuntimeIDs: Set(runnerProcesses.keys).union(runnerContainers.keys)
         )
+        lastPersistedConfig = disk
+
+        if merged.settings != currentSettings {
+            objectWillChange.send()
+            currentSettings = merged.settings
+        }
+        if merged.runners != runners {
+            runners = merged.runners
+        }
     }
 
-    /// Merge runners read from disk with the in-memory list. Disk wins for
-    /// configuration; memory keeps runtime state. Status comes from disk only
-    /// for runners this process isn't running itself.
-    nonisolated static func merge(diskRunners: [Runner], into memoryRunners: [Runner], ownedRuntimeIDs: Set<UUID>) -> [Runner] {
-        diskRunners.map { diskRunner in
-            guard var merged = memoryRunners.first(where: { $0.id == diskRunner.id }) else {
-                return diskRunner
+    /// Three-way merge of the config on disk with ours, using `base` (the last
+    /// config we persisted) to tell which side changed what. Our changes win
+    /// where we made them; everything else comes from disk. Runners added or
+    /// removed on either side stay added or removed.
+    nonisolated static func reconcile(
+        disk: RunnerConfig,
+        memory: RunnerConfig,
+        base: RunnerConfig?,
+        ownedRuntimeIDs: Set<UUID>
+    ) -> RunnerConfig {
+        let settings = (base.map { memory.settings != $0.settings } ?? false) ? memory.settings : disk.settings
+
+        let baseByID = Dictionary(base?.runners.map { ($0.id, $0) } ?? [], uniquingKeysWith: { first, _ in first })
+        let memoryByID = Dictionary(memory.runners.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let diskIDs = Set(disk.runners.map(\.id))
+
+        var runners: [Runner] = []
+        for diskRunner in disk.runners {
+            if let memoryRunner = memoryByID[diskRunner.id] {
+                runners.append(mergeRunner(
+                    disk: diskRunner,
+                    memory: memoryRunner,
+                    base: baseByID[diskRunner.id],
+                    ownsRuntime: ownedRuntimeIDs.contains(diskRunner.id)
+                ))
+            } else if baseByID[diskRunner.id] == nil {
+                runners.append(diskRunner)  // added by the other process
             }
-            merged.name = diskRunner.name
-            merged.labels = diskRunner.labels
-            merged.enabled = diskRunner.enabled
-            merged.isolationMode = diskRunner.isolationMode
-            merged.enableGUI = diskRunner.enableGUI
-            merged.openFileLimit = diskRunner.openFileLimit
-            merged.quietHours = diskRunner.quietHours
-            merged.githubRunnerId = diskRunner.githubRunnerId ?? merged.githubRunnerId
-            if !ownedRuntimeIDs.contains(diskRunner.id) {
-                merged.status = diskRunner.status
-                merged.autoPauseReason = diskRunner.autoPauseReason
-            }
-            return merged
+            // Otherwise we removed it since our last save: keep it removed.
         }
+        for memoryRunner in memory.runners where !diskIDs.contains(memoryRunner.id) && baseByID[memoryRunner.id] == nil {
+            runners.append(memoryRunner)  // added by us, not saved yet
+        }
+        // Runners in base and memory but gone from disk were removed elsewhere.
+
+        return RunnerConfig(runners: runners, settings: settings)
+    }
+
+    nonisolated static func mergeRunner(disk: Runner, memory: Runner, base: Runner?, ownsRuntime: Bool) -> Runner {
+        var merged = memory
+        if base.map({ memory.configuration == $0.configuration }) ?? true {
+            merged.configuration = disk.configuration
+        }
+        let changedStateLocally = base.map { memory.persistedState != $0.persistedState } ?? false
+        if !ownsRuntime && !changedStateLocally {
+            merged.persistedState = disk.persistedState
+        }
+        return merged
     }
 
     // MARK: - Lookup
