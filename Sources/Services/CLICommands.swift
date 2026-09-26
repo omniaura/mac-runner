@@ -124,3 +124,59 @@ enum CLIParseError: Error, Equatable {
         }
     }
 }
+
+/// Parsed `mac-runner logs` arguments.
+struct LogsCommand: Equatable {
+    static let defaultLines = 50
+
+    var runnerName: String
+    var lines = LogsCommand.defaultLines
+    var follow = false
+    var source: RunnerLogs.Source = .output
+
+    static let usage = """
+    Usage: mac-runner logs <name> [--lines N] [--follow] [--diag | --job]
+      -n, --lines N   Show the last N lines (default 50)
+      -f, --follow    Keep printing new lines as they're written (Ctrl-C to stop)
+      --diag          Show the runner's diagnostics log (_diag/Runner_*) instead of its output
+      --job           Show the newest job's diagnostics log (_diag/Worker_*)
+    """
+
+    static func parse(_ args: [String]) -> Result<LogsCommand, CLIParseError> {
+        var name: String?
+        var command = LogsCommand(runnerName: "")
+
+        var i = 0
+        while i < args.count {
+            let arg = args[i]
+            switch arg {
+            case "-n", "--lines":
+                guard i + 1 < args.count, let count = Int(args[i + 1]), count > 0 else {
+                    return .failure(.message("\(arg) requires a positive number"))
+                }
+                command.lines = count
+                i += 2
+            case "-f", "--follow":
+                command.follow = true
+                i += 1
+            case "--diag", "--job":
+                let source: RunnerLogs.Source = arg == "--diag" ? .diagnostics : .jobDiagnostics
+                guard command.source == .output || command.source == source else {
+                    return .failure(.message("--diag and --job can't be combined"))
+                }
+                command.source = source
+                i += 1
+            default:
+                guard !arg.hasPrefix("-"), name == nil else {
+                    return .failure(.message("Unknown option '\(arg)'"))
+                }
+                name = arg
+                i += 1
+            }
+        }
+
+        guard let name else { return .failure(.message("runner name required")) }
+        command.runnerName = name
+        return .success(command)
+    }
+}

@@ -75,6 +75,7 @@ class RunnerManager: ObservableObject {
     private let restartMaxDelaySeconds = 60
     private var installedUpdateVersion: String?
     private var lastAutomaticDiskCleanupCheck: Date?
+    private var lastLogMaintenance: Date?
     private let powerMonitor = PowerSourceMonitor()
     /// Only the menu bar app pauses/resumes runners automatically; one-shot CLI
     /// commands also construct a RunnerManager and must not.
@@ -679,10 +680,19 @@ class RunnerManager: ObservableObject {
                     memoryInBytes: 2 * 1024 * 1024 * 1024,  // 2 GiB
                     diskSizeInBytes: 4 * 1024 * 1024 * 1024,  // 4 GiB
                     enableNestedVirtualization: false,
-                    workspaceURL: URL(fileURLWithPath: runnerDir),
+                    // Mount only _work and _diag, so runner.log and diagnostics sit
+                    // in the runner directory like other modes and stay out of jobs' view.
+                    workspaceURL: try Self.makeDirectory(runnerDir, "_work"),
+                    diagnosticsURL: try Self.makeDirectory(runnerDir, "_diag"),
                     repositoryURL: runner.target.registrationURL,
                     registrationToken: registrationToken,
-                    openFileLimit: runner.effectiveOpenFileLimit(global: currentSettings.openFileLimit)
+                    openFileLimit: runner.effectiveOpenFileLimit(global: currentSettings.openFileLimit),
+                    logWriter: try {
+                        RunnerLogs.rotateIfNeeded(logFile)
+                        RunnerLogs.pruneDiagnostics(runnerDirectory: runnerDir)
+                        // Fail the start rather than run a container whose output goes nowhere.
+                        return try FileLogWriter(path: logFile)
+                    }()
                 )
 
                 // Create and start container
@@ -1238,10 +1248,49 @@ class RunnerManager: ObservableObject {
         }
 
         runAutomaticDiskCleanupIfNeeded()
+        maintainRunnerLogsIfNeeded()
 
         if automationEnabled {
             reloadExternalConfigChanges()
             await evaluateAutoPause()
+        }
+    }
+
+    nonisolated static func makeDirectory(_ parent: String, _ name: String) throws -> URL {
+        let url = URL(fileURLWithPath: parent).appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    /// Path of a runner's log for `source`, without creating anything.
+    func logPath(for runner: Runner, source: RunnerLogs.Source) -> String? {
+        let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
+        let directory = RunnerDirectory.directoryURL(for: runner.id, isolation: isolation).path
+        return RunnerLogs.path(for: source, runnerDirectory: directory)
+    }
+
+    /// Hourly log upkeep for runners that stay up for a long time (starting a
+    /// runner already rotates and prunes). Old `_diag` files are pruned by
+    /// modification time, so files still being written are never touched.
+    /// `runner.log` is only rotated while the runner is idle: the listener
+    /// writes a line or two per job, so no output can land between the copy
+    /// and the truncate.
+    private func maintainRunnerLogsIfNeeded(now: Date = Date()) {
+        if let lastCheck = lastLogMaintenance, now.timeIntervalSince(lastCheck) < 3600 {
+            return
+        }
+        lastLogMaintenance = now
+
+        for runner in runners where runner.status == .running {
+            let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
+            let directory = RunnerDirectory.directoryURL(for: runner.id, isolation: isolation).path
+            var serviceUser: String?
+            if case .dedicatedUser(let username) = isolation { serviceUser = username }
+
+            RunnerLogs.pruneDiagnostics(runnerDirectory: directory, serviceUser: serviceUser)
+            if !runner.busy {
+                RunnerLogs.rotateIfNeeded(RunnerLogs.outputLogPath(runnerDirectory: directory), serviceUser: serviceUser)
+            }
         }
     }
 
@@ -1731,15 +1780,8 @@ class RunnerManager: ObservableObject {
         let timestamp = formatter.string(from: Date())
         let line = "[\(timestamp)] [mac-runner] \(message)\n"
 
-        if !FileManager.default.fileExists(atPath: logPath) {
-            FileManager.default.createFile(atPath: logPath, contents: nil)
-        }
-
-        if let handle = FileHandle(forWritingAtPath: logPath) {
-            handle.seekToEndOfFile()
-            if let data = line.data(using: .utf8) {
-                handle.write(data)
-            }
+        if let handle = try? RunnerLogs.openForAppending(logPath) {
+            handle.write(Data(line.utf8))
             try? handle.close()
         }
 

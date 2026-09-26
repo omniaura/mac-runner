@@ -116,6 +116,12 @@ class ContainerIsolationService {
                     destination: "/runner/_work"
                 )
             )
+            // Diagnostics land on the host so logs can be viewed like other modes.
+            if let diagnosticsURL = config.diagnosticsURL {
+                containerConfig.mounts.append(
+                    .share(source: diagnosticsURL.path, destination: "/runner/_diag")
+                )
+            }
 
             // Configure the runner process
             containerConfig.process.arguments = [
@@ -138,6 +144,11 @@ class ContainerIsolationService {
                 """
             ]
             containerConfig.process.workingDirectory = "/runner"
+
+            if let logWriter = config.logWriter {
+                containerConfig.process.stdout = logWriter
+                containerConfig.process.stderr = logWriter
+            }
 
             // Set environment variables
             containerConfig.process.environmentVariables.append("RUNNER_ALLOW_RUNASROOT=1")
@@ -285,6 +296,39 @@ enum ContainerIsolationError: Error, LocalizedError {
     }
 }
 
+// MARK: - Logging
+
+/// Appends data to a log file. Shared by a process's stdout and stderr, so
+/// writes are serialized and `close()` is idempotent.
+final class FileLogWriter: @unchecked Sendable {
+    private let handle: FileHandle
+    private let lock = NSLock()
+    private var isClosed = false
+
+    init(path: String) throws {
+        handle = try RunnerLogs.openForAppending(path)
+    }
+
+    func write(_ data: Data) throws {
+        try lock.withLock {
+            guard !isClosed else { return }
+            try handle.write(contentsOf: data)
+        }
+    }
+
+    func close() throws {
+        try lock.withLock {
+            guard !isClosed else { return }
+            isClosed = true
+            try handle.close()
+        }
+    }
+}
+
+#if canImport(Containerization)
+extension FileLogWriter: Writer {}
+#endif
+
 // MARK: - Configuration
 
 /// Configuration for a containerized runner.
@@ -304,8 +348,11 @@ struct ContainerRunnerConfiguration {
     /// Whether to enable nested virtualization.
     var enableNestedVirtualization: Bool = false
 
-    /// Path to the runner workspace on the host.
+    /// Path to the runner workspace on the host (mounted at /runner/_work).
     var workspaceURL: URL
+
+    /// Host directory mounted at /runner/_diag for the runner's diagnostics logs.
+    var diagnosticsURL: URL?
 
     /// GitHub repository URL for runner registration.
     var repositoryURL: String
@@ -315,6 +362,10 @@ struct ContainerRunnerConfiguration {
 
     /// Maximum open file limit to set before starting the runner.
     var openFileLimit: Int = ResourceLimits.defaultOpenFileLimit
+
+    /// Receives the container process's stdout and stderr (the runner's
+    /// `runner.log` on the host), so logs work the same as other modes.
+    var logWriter: FileLogWriter?
 
     /// Default container image for GitHub Actions runners.
     static let defaultRunnerImage = "ghcr.io/actions/runner:latest"
