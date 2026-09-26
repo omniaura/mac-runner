@@ -49,10 +49,11 @@ struct DeclarativeConfig: Codable, Equatable {
         var enableGUI: Bool?
         var openFiles: Int?
         var quietHours: QuietHoursSpec?
+        var image: String?
         var count: Int?
 
         enum CodingKeys: String, CodingKey {
-            case name, repo, org, labels, isolation, count
+            case name, repo, org, labels, isolation, image, count
             case enableGUI = "enable-gui"
             case openFiles = "open-files"
             case quietHours = "quiet-hours"
@@ -178,8 +179,9 @@ struct DeclarativeConfig: Codable, Equatable {
 
     // MARK: - Resolution
 
-    /// Runner specs expanded (`count`) and validated.
-    func desiredRunners() throws -> [DesiredRunner] {
+    /// Runner specs expanded (`count`) and validated. `globalIsolation` is the
+    /// global mode that will apply (for runners that don't set `isolation`).
+    func desiredRunners(globalIsolation: IsolationMode = IsolationMode.none) throws -> [DesiredRunner] {
         var result: [DesiredRunner] = []
         for spec in runners {
             let name = spec.name.trimmingCharacters(in: .whitespaces)
@@ -206,6 +208,11 @@ struct DeclarativeConfig: Codable, Equatable {
             guard (1...50).contains(count) else {
                 throw DeclarativeConfigError.invalid("\(name): count must be between 1 and 50")
             }
+            let isolation = try Self.isolation(spec.isolation, context: name)
+            let effectiveIsolation = isolation ?? globalIsolation
+            if spec.image != nil && effectiveIsolation != .container {
+                throw DeclarativeConfigError.invalid("\(name): image requires container isolation")
+            }
             if let openFiles = spec.openFiles, openFiles < 1 {
                 throw DeclarativeConfigError.invalid("\(name): open-files must be positive")
             }
@@ -213,11 +220,12 @@ struct DeclarativeConfig: Codable, Equatable {
             let desired = DesiredRunner(
                 name: name,
                 target: target,
-                labels: spec.labels ?? Runner.defaultLabels,
-                isolation: try Self.isolation(spec.isolation, context: name),
+                labels: spec.labels ?? Runner.defaultLabels(for: effectiveIsolation),
+                isolation: isolation,
                 enableGUI: spec.enableGUI ?? false,
                 openFileLimit: spec.openFiles,
-                quietHours: try spec.quietHours?.resolved()
+                quietHours: try spec.quietHours?.resolved(),
+                containerImage: spec.image
             )
             if count == 1 {
                 result.append(desired)
@@ -306,6 +314,7 @@ struct DeclarativeConfig: Codable, Equatable {
                     enableGUI: runner.enableGUI ? true : nil,
                     openFiles: runner.openFileLimit,
                     quietHours: runner.quietHours.map(QuietHoursSpec.init),
+                    image: runner.containerImage,
                     count: nil
                 )
             }
@@ -343,6 +352,7 @@ struct DesiredRunner: Equatable {
     var enableGUI: Bool
     var openFileLimit: Int?
     var quietHours: QuietHours?
+    var containerImage: String? = nil
 }
 
 /// What `mac-runner apply` will do.
@@ -424,6 +434,10 @@ enum ConfigPlanner {
             }
             if have.enableGUI != want.enableGUI {
                 updates.append(want.enableGUI ? "enable GUI" : "disable GUI")
+                restart = true
+            }
+            if have.containerImage != want.containerImage {
+                updates.append("image \(have.containerImage ?? "default") → \(want.containerImage ?? "default")")
                 restart = true
             }
             if have.openFileLimit != want.openFileLimit {

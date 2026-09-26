@@ -327,6 +327,10 @@ struct RunnerDetailView: View {
         return DetailSection(title: "Configuration") {
             DetailRow("Scope", runner.scope.displayName)
             DetailRow("Isolation", "\(isolation.icon) \(isolation.displayName)\(runner.isolationMode == nil ? " (global)" : "")")
+            if isolation == .container {
+                DetailRow("Image", runner.containerImage ?? ContainerRunnerConfiguration.defaultRunnerImage)
+                DetailRow("Tools", (runner.containerTools ?? []).isEmpty ? "—" : (runner.containerTools ?? []).joined(separator: ", "))
+            }
             DetailRow("Display", runner.enableGUI ? "GUI access" : "Headless")
             DetailRow("Labels", runner.labels.isEmpty ? "—" : runner.labels.joined(separator: ", "))
             DetailRow("Open files", "\(runner.effectiveOpenFileLimit(global: runnerManager.currentSettings.openFileLimit))")

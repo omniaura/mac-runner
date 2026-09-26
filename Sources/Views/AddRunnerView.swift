@@ -12,6 +12,7 @@ struct AddRunnerView: View {
     @State private var selectedIsolation: IsolationSelection = .global
     @State private var enableGUI = false
     @State private var openFileLimitText = ""
+    @State private var containerImage = ""
     @State private var repoSections: [(header: String, repos: [String])] = []
     @State private var orgs: [String] = []
     @State private var repoSearchText = ""
@@ -168,6 +169,16 @@ struct AddRunnerView: View {
                             }
                         }
                         .pickerStyle(.menu)
+                        .onChange(of: selectedIsolation) { _, newValue in
+                            // Swap untouched default labels between macOS and Linux runners.
+                            let macDefaults = Runner.defaultLabels.joined(separator: ", ")
+                            let linuxDefaults = Runner.defaultLabels(for: .container).joined(separator: ", ")
+                            if newValue == .container, labelsText == macDefaults {
+                                labelsText = linuxDefaults
+                            } else if newValue != .container, labelsText == linuxDefaults {
+                                labelsText = macDefaults
+                            }
+                        }
 
                         // Warning for container isolation
                         if selectedIsolation == .container {
@@ -175,10 +186,17 @@ struct AddRunnerView: View {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .foregroundColor(.orange)
                                     .font(.caption)
-                                Text("Requires macOS 26.0+")
+                                Text("Requires macOS 26.0+ on Apple Silicon")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
+
+                            TextField(ContainerRunnerConfiguration.defaultRunnerImage, text: $containerImage)
+                                .textFieldStyle(.roundedBorder)
+                                .help("OCI image the runner's Linux container uses")
+                            Text("Container image. Leave empty for GitHub's runner image. Any Linux arm64 image with bash works; see the README for requirements.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                     }
 
@@ -498,6 +516,7 @@ struct AddRunnerView: View {
                 isolationMode: selectedIsolation.isolationMode,
                 enableGUI: enableGUI,
                 openFileLimit: openFileLimit,
+                containerImage: selectedIsolation == .container ? containerImage : nil,
                 onProgress: { current, total in
                     addingProgress = (current: current, total: total)
                 }

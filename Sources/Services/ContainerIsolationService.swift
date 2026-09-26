@@ -57,6 +57,10 @@ class ContainerIsolationService {
     /// This must be called before creating any containers.
     ///
     /// - Throws: If initialization fails (e.g., kernel not found, networking unavailable).
+    /// Guest init image; its version must match the containerization package
+    /// pinned in Package.swift.
+    static let initfsReference = "ghcr.io/apple/containerization/vminit:0.47.0"
+
     func initialize() async throws {
         // Verify kernel exists
         guard FileManager.default.fileExists(atPath: kernelPath.path) else {
@@ -76,12 +80,47 @@ class ContainerIsolationService {
         // Create network configuration (vmnet shared mode)
         let network = try VmnetNetwork()
 
+        // containerization reuses an existing initfs.ext4 whatever vminit built it;
+        // rebuild it when our pinned vminit changes, or the guest agent won't match.
+        let storeRoot = Self.defaultStoreRoot()
+        // Another Mac Runner process (the app or a CLI) may be initializing the
+        // same store: serialize checking, rebuilding, and recording the initfs.
+        try FileManager.default.createDirectory(at: storeRoot, withIntermediateDirectories: true)
+        let lock = try FileLock(path: storeRoot.appendingPathComponent("mac-runner-initfs.lock").path)
+        defer { lock.unlock() }
+        Self.discardStaleInitFilesystem(storeRoot: storeRoot, reference: Self.initfsReference)
+
         // Initialize container manager with kernel and network
         // vminit will be fetched automatically from registry on first use
         self.containerManager = try await ContainerManager(
             kernel: kernel,
-            initfsReference: "ghcr.io/apple/containerization/vminit:0.13.0",
+            initfsReference: Self.initfsReference,
             network: network
+        )
+        Self.recordInitFilesystem(storeRoot: storeRoot, reference: Self.initfsReference)
+    }
+
+    /// containerization's default store: ~/Library/Application Support/com.apple.containerization
+    static func defaultStoreRoot() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("com.apple.containerization", isDirectory: true)
+    }
+
+    private static let initFilesystemMarker = "mac-runner-initfs-reference"
+
+    /// Delete initfs.ext4 unless it was built from `reference`.
+    static func discardStaleInitFilesystem(storeRoot: URL, reference: String) {
+        let marker = storeRoot.appendingPathComponent(initFilesystemMarker)
+        let builtFrom = try? String(contentsOf: marker, encoding: .utf8)
+        guard builtFrom?.trimmingCharacters(in: .whitespacesAndNewlines) != reference else { return }
+        try? FileManager.default.removeItem(at: storeRoot.appendingPathComponent("initfs.ext4"))
+    }
+
+    static func recordInitFilesystem(storeRoot: URL, reference: String) {
+        try? (reference + "\n").write(
+            to: storeRoot.appendingPathComponent(initFilesystemMarker),
+            atomically: true,
+            encoding: .utf8
         )
     }
 
@@ -109,54 +148,46 @@ class ContainerIsolationService {
             containerConfig.cpus = config.cpuCount
             containerConfig.memoryInBytes = config.memoryInBytes
 
-            // Mount runner workspace into container
+            // Job workspaces and diagnostics live on the host.
             containerConfig.mounts.append(
-                .share(
-                    source: config.workspaceURL.path,
-                    destination: "/runner/_work"
-                )
+                .share(source: config.workspaceURL.path, destination: ContainerRunnerScript.workMount)
             )
-            // Diagnostics land on the host so logs can be viewed like other modes.
             if let diagnosticsURL = config.diagnosticsURL {
                 containerConfig.mounts.append(
-                    .share(source: diagnosticsURL.path, destination: "/runner/_diag")
+                    .share(source: diagnosticsURL.path, destination: ContainerRunnerScript.diagnosticsMount)
                 )
             }
 
-            // Configure the runner process
-            containerConfig.process.arguments = [
-                "/bin/bash",
-                "-c",
-                """
-                # Install GitHub Actions runner if not present
-                if [ ! -f /runner/run.sh ]; then
-                    cd /runner
-                    curl -o actions-runner-linux-arm64.tar.gz -L https://github.com/actions/runner/releases/latest/download/actions-runner-linux-arm64.tar.gz
-                    tar xzf actions-runner-linux-arm64.tar.gz
-                    rm actions-runner-linux-arm64.tar.gz
-                fi
+            // A resolvable hostname named after the runner (sudo warns otherwise).
+            let hostname = ContainerRunnerScript.hostname(for: config.runnerName)
+            containerConfig.hostname = hostname
+            var hosts = Hosts.default
+            hosts.entries.append(Hosts.Entry(ipAddress: "127.0.1.1", hostnames: [hostname]))
+            containerConfig.hosts = hosts
 
-                # Configure and start runner
-                cd /runner
-                ./config.sh --unattended --url \(config.repositoryURL) --token \(config.registrationToken)
-                ulimit -n \(config.openFileLimit) 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
-                ./run.sh
-                """
-            ]
-            containerConfig.process.workingDirectory = "/runner"
+            containerConfig.process.arguments = ["/bin/bash", "-c", ContainerRunnerScript.script]
+            containerConfig.process.workingDirectory = "/"
+            containerConfig.process.environmentVariables.append(
+                contentsOf: ContainerRunnerScript.environment(for: config)
+            )
 
             if let logWriter = config.logWriter {
                 containerConfig.process.stdout = logWriter
                 containerConfig.process.stderr = logWriter
             }
 
-            // Set environment variables
-            containerConfig.process.environmentVariables.append("RUNNER_ALLOW_RUNASROOT=1")
-
             if config.enableNestedVirtualization {
                 // Reserved for framework support.
             }
         }
+
+        // A crash or failed start can leave this runner's previous container
+        // behind, and create() refuses to reuse the id. Nothing is running
+        // under it (startRunner checked), so clear it.
+        if let stale = activeContainers.removeValue(forKey: id) {
+            try? await stale.stop()
+        }
+        try? manager.delete(id)
 
         // Create container with specified configuration
         let container = try await manager.create(
@@ -283,7 +314,7 @@ enum ContainerIsolationError: Error, LocalizedError {
         case .notInitialized:
             return "Container isolation service not initialized. Call initialize() first."
         case .kernelNotFound(let path):
-            return "Linux kernel not found at path: \(path.path)"
+            return "Container isolation needs a Linux kernel at \(path.path). Download kata-static-*-arm64.tar.xz from https://github.com/kata-containers/kata-containers/releases and copy opt/kata/share/kata-containers/vmlinux.container there as vmlinux."
         case .containerNotFound(let id):
             return "Container not found: \(id)"
         case .creationFailed(let message):
@@ -293,6 +324,32 @@ enum ContainerIsolationError: Error, LocalizedError {
         case .stopFailed(let message):
             return "Failed to stop container: \(message)"
         }
+    }
+}
+
+// MARK: - Locking
+
+/// An exclusive advisory lock (flock) on a file, shared across processes.
+final class FileLock {
+    private var fd: Int32
+
+    init(path: String) throws {
+        fd = open(path, O_CREAT | O_RDWR, 0o644)
+        guard fd >= 0 else {
+            throw CocoaError(.fileWriteNoPermission, userInfo: [NSFilePathErrorKey: path])
+        }
+        _ = flock(fd, LOCK_EX)
+    }
+
+    func unlock() {
+        guard fd >= 0 else { return }
+        _ = flock(fd, LOCK_UN)
+        close(fd)
+        fd = -1
+    }
+
+    deinit {
+        unlock()
     }
 }
 
@@ -348,10 +405,10 @@ struct ContainerRunnerConfiguration {
     /// Whether to enable nested virtualization.
     var enableNestedVirtualization: Bool = false
 
-    /// Path to the runner workspace on the host (mounted at /runner/_work).
+    /// Path to the runner workspace on the host (mounted as the runner's work directory).
     var workspaceURL: URL
 
-    /// Host directory mounted at /runner/_diag for the runner's diagnostics logs.
+    /// Host directory mounted for the runner's diagnostics logs.
     var diagnosticsURL: URL?
 
     /// GitHub repository URL for runner registration.
@@ -360,6 +417,16 @@ struct ContainerRunnerConfiguration {
     /// Registration token for the runner.
     var registrationToken: String
 
+    /// Name and labels the runner registers with.
+    var runnerName: String
+    var labels: [String]
+
+    /// Tools to install when the container starts (see `ToolProvisioningService.plan`).
+    var tools: [String] = []
+
+    /// Linux runner tarball, used only when the image doesn't include the runner.
+    var runnerDownloadURL: String
+
     /// Maximum open file limit to set before starting the runner.
     var openFileLimit: Int = ResourceLimits.defaultOpenFileLimit
 
@@ -367,8 +434,9 @@ struct ContainerRunnerConfiguration {
     /// `runner.log` on the host), so logs work the same as other modes.
     var logWriter: FileLogWriter?
 
-    /// Default container image for GitHub Actions runners.
-    static let defaultRunnerImage = "ghcr.io/actions/runner:latest"
+    /// Default container image: GitHub's official runner image, which ships the
+    /// Actions runner in /home/runner. (`ghcr.io/actions/runner` doesn't exist.)
+    static let defaultRunnerImage = "ghcr.io/actions/actions-runner:latest"
 }
 
 // MARK: - Helper Extensions

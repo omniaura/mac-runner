@@ -57,6 +57,11 @@ class RunnerInstaller {
         return version
     }
 
+    /// Linux arm64 runner, for container runners on Apple Silicon.
+    static func linuxDownloadURL(version: String) -> String {
+        "https://github.com/actions/runner/releases/download/v\(version)/actions-runner-linux-arm64-\(version).tar.gz"
+    }
+
     static func downloadURL(version: String, arch: String) -> String {
         "https://github.com/actions/runner/releases/download/v\(version)/actions-runner-osx-\(arch)-\(version).tar.gz"
     }

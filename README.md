@@ -265,19 +265,38 @@ Mac Runner supports three isolation modes to protect your development environmen
   ```
 
 ### 3. Container Isolation (macOS 26+, Apple Silicon)
-- Runs Linux workflows in isolated, lightweight virtual machines
-- Uses Apple's [Containerization framework](https://github.com/apple/containerization)
-- Sub-second startup times with Rosetta 2 for linux/amd64 emulation
-- Best for Linux-based workflows, Docker builds, cross-platform testing
-- **Requirements:** macOS 26+, Apple Silicon, Linux kernel 6.14.9+
+- Runs each runner as a **Linux** (arm64) runner inside its own lightweight VM, using Apple's [Containerization framework](https://github.com/apple/containerization)
+- Best for Linux-based workflows and cross-platform testing
+- **Requirements:** macOS 26+, Apple Silicon, and a Linux kernel (see below)
 - **How to enable:**
   ```bash
-  # CLI
+  # CLI (default image: GitHub's ghcr.io/actions/actions-runner:latest)
   mac-runner add owner/repo --isolation container
 
+  # With your own image
+  mac-runner add owner/repo --isolation container --image ghcr.io/myorg/ci-image:latest
+
   # GUI
-  Settings → Isolation Mode → Container
+  Add Runner → Isolation Mode → Container (optionally set Container Image)
   ```
+
+**Kernel.** Mac Runner looks for a Linux kernel at `MacRunner.app/Contents/Resources/vmlinux` or `~/Library/Application Support/MacRunner/vmlinux`. The [Kata Containers](https://github.com/kata-containers/kata-containers/releases) kernel works:
+```bash
+curl -fLO https://github.com/kata-containers/kata-containers/releases/download/3.17.0/kata-static-3.17.0-arm64.tar.xz
+tar -xJf kata-static-3.17.0-arm64.tar.xz ./opt/kata/share/kata-containers/vmlinux.container
+cp -L opt/kata/share/kata-containers/vmlinux.container ~/Library/Application\ Support/MacRunner/vmlinux
+```
+
+**Images.** Images are pulled from any public OCI registry (GHCR, Docker Hub, …) the first time a runner uses them and are cached locally after that. An image needs:
+- linux/arm64 and `bash`
+- Either the GitHub Actions runner already installed at `/home/runner`, `/actions-runner`, or `/runner` (as in `ghcr.io/actions/actions-runner`), or `curl` and `tar` so Mac Runner can download it at start
+- `apt-get` (Debian/Ubuntu) if you want automatic tool installation. Other images still work; tools just aren't installed for you.
+
+**Tools.** When a container runner is created, Mac Runner picks the tools its jobs are likely to need: the GitHub CLI, toolchains detected from the repository (Node, Python, Go, Ruby, Rust), and any **Extra CI Tools** from Settings (installed as apt packages). They're installed with `apt-get` each time the runner's container starts, never per job.
+
+**Lifetime.** A container runner's VM lives inside the process that started it. Start container runners from the menu bar app to keep them running in the background. `mac-runner add`/`start` for a container runner stays in the foreground and streams its output until you press Ctrl-C.
+
+Container runners register with the name and labels you give them (default labels: `linux, mac-runner`). Their `runner.log` and `_diag` logs sit in the runner's directory like other modes (`mac-runner logs <name>`).
 
 ### Per-Runner Isolation Override
 
