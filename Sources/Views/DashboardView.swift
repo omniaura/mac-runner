@@ -375,9 +375,7 @@ struct RunnerDetailView: View {
         DetailSection(title: "Recent Jobs") {
             let jobs = runnerManager.recentJobs[runner.id] ?? []
             if jobs.isEmpty {
-                Text(runner.scope == .repo
-                    ? "No jobs since Mac Runner started."
-                    : "Job history isn't available for organization runners.")
+                Text("No jobs since Mac Runner started.")
                     .foregroundColor(.secondary)
             } else {
                 ForEach(jobs) { job in
