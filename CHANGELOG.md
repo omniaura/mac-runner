@@ -1,3 +1,10 @@
+# [1.21.0](https://github.com/omniaura/mac-runner/compare/v1.20.0...v1.21.0) (2026-09-26)
+
+
+### Features
+
+* pause runners on low battery and during quiet hours ([#86](https://github.com/omniaura/mac-runner/issues/86)) ([bbaa93c](https://github.com/omniaura/mac-runner/commit/bbaa93cfa3d5770a16fb0e3ff7bc78d735abbee0)), closes [#40](https://github.com/omniaura/mac-runner/issues/40) [#41](https://github.com/omniaura/mac-runner/issues/41) [#40](https://github.com/omniaura/mac-runner/issues/40) [#41](https://github.com/omniaura/mac-runner/issues/41)
+
 # [1.20.0](https://github.com/omniaura/mac-runner/compare/v1.19.1...v1.20.0) (2026-09-26)
 
 
