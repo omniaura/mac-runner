@@ -22,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var popover: NSPopover!
     let runnerManager = RunnerManager()
     private var settingsWindow: NSWindow?
+    private var iconAnimator: StatusItemIconAnimator?
     private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -34,6 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.action = #selector(togglePopover)
             button.target = self
         }
+        iconAnimator = StatusItemIconAnimator(button: statusItem.button)
         updateStatusItemIcon()
 
         popover = NSPopover()
@@ -50,22 +52,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        runnerManager.$availableUpdate
+        // Busy state changes arrive via objectWillChange (status polling doesn't
+        // reassign `runners`), so observe the whole manager.
+        runnerManager.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateStatusItemIcon()
             }
             .store(in: &cancellables)
 
+        NSWorkspace.shared.notificationCenter.publisher(
+            for: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] _ in
+            self?.updateStatusItemIcon()
+        }
+        .store(in: &cancellables)
+
         Task { await runnerManager.autoRestartRunners() }
         Task { await runnerManager.checkForUpdates() }
     }
 
     private func updateStatusItemIcon() {
-        guard let button = statusItem.button else { return }
-
-        let symbolName = runnerManager.availableUpdate == nil ? "figure.run" : "arrow.down.circle.fill"
-        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Mac Runner")
+        let runners = runnerManager.runners
+        let updateAvailable = runnerManager.availableUpdate != nil
+        iconAnimator?.apply(
+            StatusItemIcon.state(
+                runners: runners,
+                updateAvailable: updateAvailable,
+                reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            ),
+            toolTip: StatusItemIcon.toolTip(runners: runners, updateAvailable: updateAvailable)
+        )
     }
 
     @objc func togglePopover() {
