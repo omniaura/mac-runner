@@ -17,6 +17,26 @@ struct WorkflowJobSummary: Sendable, Equatable {
     let run: WorkflowRunSummary
 }
 
+/// A job a runner picked up while the app was running.
+struct RecentJob: Sendable, Equatable, Identifiable {
+    var job: WorkflowJobSummary
+    var startedAt: Date
+    var finishedAt: Date?
+
+    var id: Int { job.id }
+
+    var displayName: String {
+        job.run.name.isEmpty ? job.name : "\(job.run.name) · \(job.name)"
+    }
+
+    /// "running", then "pending" until GitHub reports the result, then its
+    /// conclusion ("success", "failure", ...).
+    var outcome: String {
+        guard finishedAt != nil else { return "running" }
+        return job.conclusion ?? "pending"
+    }
+}
+
 struct JobNotificationPayload: Equatable {
     let title: String
     let body: String

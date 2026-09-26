@@ -23,6 +23,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let runnerManager = RunnerManager()
     private var settingsWindow: NSWindow?
     private var logWindows: [UUID: NSWindow] = [:]
+    private var dashboardWindow: NSWindow?
     private var iconAnimator: StatusItemIconAnimator?
     private var cancellables: Set<AnyCancellable> = []
 
@@ -50,6 +51,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(handleOpenSettings),
             name: .openSettings,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOpenDashboard),
+            name: .openDashboard,
             object: nil
         )
         NotificationCenter.default.addObserver(
@@ -187,9 +194,50 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Opening the app again (Finder, Spotlight, Dock) shows the dashboard.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        handleOpenDashboard()
+        return false
+    }
+
+    @objc func handleOpenDashboard() {
+        popover.performClose(nil)
+        NSApp.setActivationPolicy(.regular)
+
+        if let window = dashboardWindow {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let window = NSWindow(
+            contentViewController: NSHostingController(rootView: DashboardView().environmentObject(runnerManager))
+        )
+        window.title = "Mac Runner"
+        window.styleMask = [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView]
+        window.setContentSize(NSSize(width: 1040, height: 700))
+        window.setFrameAutosaveName("Dashboard")
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        dashboardWindow = window
+
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.dashboardWindow = nil
+                self?.restoreAccessoryPolicyIfNoWindows()
+            }
+        }
+    }
+
     /// Hide the dock icon again once no Mac Runner windows remain open.
     private func restoreAccessoryPolicyIfNoWindows() {
-        guard settingsWindow == nil, logWindows.isEmpty else { return }
+        guard settingsWindow == nil, logWindows.isEmpty, dashboardWindow == nil else { return }
         NSApp.setActivationPolicy(.accessory)
     }
 }

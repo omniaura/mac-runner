@@ -33,6 +33,15 @@ enum RunnerLogs {
             }
         }
 
+        /// Compact label for the viewer's source picker.
+        var shortName: String {
+            switch self {
+            case .output: return "Output"
+            case .diagnostics: return "Runner"
+            case .jobDiagnostics: return "Job"
+            }
+        }
+
         /// `_diag` file-name prefix for diagnostics sources.
         var diagnosticsPrefix: String? {
             switch self {

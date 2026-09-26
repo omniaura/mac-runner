@@ -34,7 +34,7 @@ struct AddRunnerView: View {
         var isolationMode: IsolationMode? {
             switch self {
             case .global: return nil
-            case .none: return .none
+            case .none: return IsolationMode.none  // not `.none`, which is Optional.none (global)
             case .user: return .dedicatedUser(username: IsolationMode.defaultUsername)
             case .container: return .container
             }

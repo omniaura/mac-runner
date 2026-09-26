@@ -60,6 +60,22 @@ private final class LockedData: @unchecked Sendable {
     }
 }
 
+private struct APIJob: Decodable {
+    let id: Int
+    let name: String
+    let status: String
+    let conclusion: String?
+    let runnerName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case status
+        case conclusion
+        case runnerName = "runner_name"
+    }
+}
+
 final class GHCLIService: Sendable {
     static let shared = GHCLIService()
 
@@ -283,17 +299,25 @@ final class GHCLIService: Sendable {
         return nil
     }
 
-    func completedJob(for repo: String, runnerName: String, runID: Int) async throws -> WorkflowJobSummary? {
-        let runs = try await listWorkflowRuns(for: repo, status: "completed")
-
-        guard let run = runs.first(where: { $0.id == runID }) else {
-            return nil
+    /// A specific job by id, whatever state its workflow run is in.
+    func job(for repo: String, id: Int, run: WorkflowRunSummary) async throws -> WorkflowJobSummary? {
+        let result = try await runGH(["api", "repos/\(repo)/actions/jobs/\(id)"])
+        guard result.exitCode == 0 else {
+            throw GHError.apiFailed("Failed to get workflow job: \(result.stderr)")
         }
+        return try Self.decodeJob(Data(result.stdout.utf8), run: run)
+    }
 
-        let jobs = try await listJobs(for: repo, runID: run.id, run: run)
-        return jobs.first(where: {
-            $0.runnerName == runnerName && $0.status == "completed"
-        })
+    static func decodeJob(_ data: Data, run: WorkflowRunSummary) throws -> WorkflowJobSummary {
+        let job = try JSONDecoder().decode(APIJob.self, from: data)
+        return WorkflowJobSummary(
+            id: job.id,
+            name: job.name,
+            status: job.status,
+            conclusion: job.conclusion,
+            runnerName: job.runnerName,
+            run: run
+        )
     }
 
     // MARK: - Runners
@@ -427,22 +451,6 @@ final class GHCLIService: Sendable {
         ])
         guard result.exitCode == 0 else {
             throw GHError.apiFailed("Failed to list workflow jobs: \(result.stderr)")
-        }
-
-        struct APIJob: Decodable {
-            let id: Int
-            let name: String
-            let status: String
-            let conclusion: String?
-            let runnerName: String?
-
-            enum CodingKeys: String, CodingKey {
-                case id
-                case name
-                case status
-                case conclusion
-                case runnerName = "runner_name"
-            }
         }
 
         let data = Data(result.stdout.utf8)

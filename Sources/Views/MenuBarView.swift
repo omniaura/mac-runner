@@ -15,6 +15,13 @@ struct MenuBarView: View {
                 Text("Mac Runner")
                     .font(.headline)
                 Spacer()
+                Button(action: {
+                    NotificationCenter.default.post(name: .openDashboard, object: nil)
+                }) {
+                    Image(systemName: "macwindow")
+                }
+                .buttonStyle(.plain)
+                .help("Open Dashboard")
                 Button(action: { showAddRunner = true }) {
                     Image(systemName: "plus")
                 }
