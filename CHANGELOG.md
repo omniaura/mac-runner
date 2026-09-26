@@ -1,3 +1,10 @@
+# [1.22.0](https://github.com/omniaura/mac-runner/compare/v1.21.0...v1.22.0) (2026-09-26)
+
+
+### Features
+
+* add a runner log viewer and `mac-runner logs` ([#91](https://github.com/omniaura/mac-runner/issues/91)) ([5ddc02a](https://github.com/omniaura/mac-runner/commit/5ddc02a4ee64342bfdfc3c79b4a161f52647d95f)), closes [#47](https://github.com/omniaura/mac-runner/issues/47)
+
 # [1.21.0](https://github.com/omniaura/mac-runner/compare/v1.20.0...v1.21.0) (2026-09-26)
 
 
