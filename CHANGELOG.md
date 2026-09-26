@@ -1,3 +1,10 @@
+# [1.25.0](https://github.com/omniaura/mac-runner/compare/v1.24.0...v1.25.0) (2026-09-26)
+
+
+### Features
+
+* catch every job from the runner's own log ([#96](https://github.com/omniaura/mac-runner/issues/96)) ([95fe565](https://github.com/omniaura/mac-runner/commit/95fe5651ddb636a5a94f71e9b9dbfb5bea39ad38))
+
 # [1.24.0](https://github.com/omniaura/mac-runner/compare/v1.23.0...v1.24.0) (2026-09-26)
 
 
