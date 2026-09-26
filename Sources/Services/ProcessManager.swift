@@ -35,6 +35,7 @@ class ProcessManager {
             // Append to the existing log (earlier runs and Mac Runner's own
             // events stay visible), rotating it first if it has grown too big.
             RunnerLogs.rotateIfNeeded(logFile)
+            RunnerLogs.pruneDiagnostics(runnerDirectory: workingDirectory)
             guard let logHandle = try? RunnerLogs.openForAppending(logFile) else {
                 throw RunnerError.startFailed
             }
@@ -69,6 +70,7 @@ class ProcessManager {
             )
 
             RunnerLogs.rotateIfNeeded(logFile, serviceUser: username)
+            RunnerLogs.pruneDiagnostics(runnerDirectory: workingDirectory, serviceUser: username)
 
             // The workspace is owned by the service user, so it creates the log and
             // grants only the host user (via ACL) write access, so we can open it

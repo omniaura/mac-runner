@@ -58,12 +58,13 @@ final class LogViewerModel: ObservableObject {
             follower = nil
             return
         }
-        lines = RunnerLogs.lastLines(of: path, count: Self.maxLines)
-        follower = LogFollower(path: path, startAtEnd: true)
+        let tail = RunnerLogs.tail(of: path, count: Self.maxLines)
+        lines = tail.lines
+        follower = LogFollower(path: path, offset: tail.endOffset)
     }
 
     func poll() {
-        // Diagnostics move to a new file each time the runner restarts.
+        // Diagnostics move to a new file each time the runner restarts or runs a job.
         let latest = resolvePath(source)
         if latest != path || follower == nil {
             reload()
@@ -89,7 +90,7 @@ final class LogViewerModel: ObservableObject {
     func export() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.log, .plainText]
-        panel.nameFieldStringValue = "\(runner.name)-\(source == .output ? "runner" : "diagnostics").log"
+        panel.nameFieldStringValue = "\(runner.name)-\(source.rawValue).log"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         try? exportText.write(to: url, atomically: true, encoding: .utf8)
     }
@@ -148,7 +149,7 @@ struct LogViewerView: View {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(.system(size: 32))
                         .foregroundColor(.secondary)
-                    Text(model.source == .output ? "No output logged yet" : "No diagnostics logs yet")
+                    Text(model.source == .output ? "No output logged yet" : "No \(model.source.displayName.lowercased()) logs yet")
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

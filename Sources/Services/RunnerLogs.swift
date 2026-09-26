@@ -12,16 +12,33 @@ enum RunnerLogs {
     /// Rotated copies kept alongside it (runner.log.1 ... runner.log.N).
     static let keptRotations = 3
 
+    /// Days of `_diag` files kept; older ones are pruned when the runner starts.
+    static let diagnosticsRetentionDays = 7
+
     enum Source: String, CaseIterable, Identifiable, Sendable {
+        /// The runner process's stdout/stderr plus Mac Runner's events.
         case output
+        /// The listener's own log (`_diag/Runner_*.log`), one per runner start.
         case diagnostics
+        /// The newest job's worker log (`_diag/Worker_*.log`), one per job.
+        case jobDiagnostics
 
         var id: String { rawValue }
 
         var displayName: String {
             switch self {
-            case .output: return "Runner Output"
-            case .diagnostics: return "Diagnostics"
+            case .output: return "Output"
+            case .diagnostics: return "Runner Diagnostics"
+            case .jobDiagnostics: return "Job Diagnostics"
+            }
+        }
+
+        /// `_diag` file-name prefix for diagnostics sources.
+        var diagnosticsPrefix: String? {
+            switch self {
+            case .output: return nil
+            case .diagnostics: return "Runner_"
+            case .jobDiagnostics: return "Worker_"
             }
         }
     }
@@ -30,26 +47,24 @@ enum RunnerLogs {
         (runnerDirectory as NSString).appendingPathComponent(fileName)
     }
 
-    /// Newest `_diag` log (Runner_ or Worker_), or nil if the runner hasn't written one yet.
-    static func latestDiagnosticsLogPath(runnerDirectory: String, fileManager: FileManager = .default) -> String? {
+    /// Newest `_diag` log with `prefix`, or nil if the runner hasn't written one.
+    /// The runner names them `Runner_YYYYMMDD-HHMMSS-utc.log`, so the name orders
+    /// them; modification times would flip between files that are both active.
+    static func latestDiagnosticsLogPath(runnerDirectory: String, prefix: String, fileManager: FileManager = .default) -> String? {
         let diag = (runnerDirectory as NSString).appendingPathComponent("_diag")
         guard let names = try? fileManager.contentsOfDirectory(atPath: diag) else { return nil }
 
         return names
-            .filter { $0.hasSuffix(".log") }
+            .filter { $0.hasPrefix(prefix) && $0.hasSuffix(".log") }
+            .max()
             .map { (diag as NSString).appendingPathComponent($0) }
-            .max { modificationDate($0, fileManager) < modificationDate($1, fileManager) }
     }
 
     static func path(for source: Source, runnerDirectory: String) -> String? {
-        switch source {
-        case .output: return outputLogPath(runnerDirectory: runnerDirectory)
-        case .diagnostics: return latestDiagnosticsLogPath(runnerDirectory: runnerDirectory)
+        guard let prefix = source.diagnosticsPrefix else {
+            return outputLogPath(runnerDirectory: runnerDirectory)
         }
-    }
-
-    private static func modificationDate(_ path: String, _ fileManager: FileManager) -> Date {
-        ((try? fileManager.attributesOfItem(atPath: path))?[.modificationDate] as? Date) ?? .distantPast
+        return latestDiagnosticsLogPath(runnerDirectory: runnerDirectory, prefix: prefix)
     }
 
     // MARK: - Writing
@@ -68,19 +83,30 @@ enum RunnerLogs {
 
     /// The last `count` lines of the file at `path` (reads at most `maxBytes` from the end).
     static func lastLines(of path: String, count: Int, maxBytes: UInt64 = 4 * 1024 * 1024) -> [String] {
-        guard count > 0, let handle = FileHandle(forReadingAtPath: path) else { return [] }
+        tail(of: path, count: count, maxBytes: maxBytes).lines
+    }
+
+    /// The last `count` lines plus the file offset the read ended at, so a
+    /// `LogFollower` can continue from exactly there without missing lines.
+    static func tail(of path: String, count: Int, maxBytes: UInt64 = 4 * 1024 * 1024) -> (lines: [String], endOffset: UInt64) {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return ([], 0) }
         defer { try? handle.close() }
 
         let size = (try? handle.seekToEnd()) ?? 0
         let start = size > maxBytes ? size - maxBytes : 0
         try? handle.seek(toOffset: start)
-        let data = (try? handle.readToEnd()) ?? Data()
+        var data = (try? handle.readToEnd()) ?? Data()
+
+        // Only complete lines; a trailing partial line is left for the follower.
+        let lastNewline = data.lastIndex(of: 0x0A)
+        let completeEnd = lastNewline.map { UInt64($0 - data.startIndex + 1) + start } ?? start
+        data = lastNewline.map { data[data.startIndex...$0] } ?? Data()
 
         var lines = splitLines(String(decoding: data, as: UTF8.self))
         if start > 0, !lines.isEmpty {
             lines.removeFirst()  // partial line where the read began
         }
-        return Array(lines.suffix(count))
+        return (count > 0 ? Array(lines.suffix(count)) : [], completeEnd)
     }
 
     static func splitLines(_ text: String) -> [String] {
@@ -122,8 +148,10 @@ enum RunnerLogs {
         return steps.joined(separator: " && ")
     }
 
-    /// Rotate the log if it's too big. Dedicated-user logs live in a directory
-    /// only the service user can write, so the rotation runs as that user.
+    /// Rotate the log if it's too big. Only called before a runner starts,
+    /// when nothing is writing to it, so no output can be lost between the
+    /// copy and the truncate. Dedicated-user logs live in a directory only the
+    /// service user can write, so the rotation runs as that user.
     @discardableResult
     static func rotateIfNeeded(
         _ path: String,
@@ -132,8 +160,28 @@ enum RunnerLogs {
         keep: Int = RunnerLogs.keptRotations
     ) -> Bool {
         guard needsRotation(path, maxBytes: maxBytes) else { return false }
-        let command = rotationCommand(path: path, keep: keep)
+        let succeeded = runShell(rotationCommand(path: path, keep: keep), as: serviceUser)
+        if !succeeded {
+            print("Warning: failed to rotate \(path); it will be retried the next time the runner starts.")
+        }
+        return succeeded
+    }
 
+    /// Shell command deleting `_diag` logs older than `days` days.
+    static func diagnosticsPruneCommand(runnerDirectory: String, days: Int = RunnerLogs.diagnosticsRetentionDays) -> String {
+        let diag = (runnerDirectory as NSString).appendingPathComponent("_diag")
+        let quoted = "'" + diag.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return "if [ -d \(quoted) ]; then find \(quoted) -maxdepth 1 -type f -name '*.log' -mtime +\(days) -delete; fi"
+    }
+
+    /// Remove old `_diag` logs; the runner writes a new one per start and per job
+    /// and never deletes them.
+    @discardableResult
+    static func pruneDiagnostics(runnerDirectory: String, serviceUser: String? = nil, days: Int = RunnerLogs.diagnosticsRetentionDays) -> Bool {
+        runShell(diagnosticsPruneCommand(runnerDirectory: runnerDirectory, days: days), as: serviceUser)
+    }
+
+    private static func runShell(_ command: String, as serviceUser: String?) -> Bool {
         let result: ProcessExecutor.ProcessResult?
         if let serviceUser {
             result = try? ProcessExecutor.run(
@@ -151,27 +199,39 @@ enum RunnerLogs {
 /// rotation (the file shrinking or being replaced).
 final class LogFollower {
     let path: String
-    private var offset: UInt64 = 0
+    private var offset: UInt64
     private var fileID: UInt64?
-    private var pending = ""
+    /// Bytes after the last newline, kept raw so a UTF-8 character split
+    /// across reads isn't mangled.
+    private var pending = Data()
 
-    init(path: String, startAtEnd: Bool) {
+    /// Follow from `offset` (e.g. where `RunnerLogs.tail` stopped).
+    init(path: String, offset: UInt64) {
         self.path = path
-        if startAtEnd, let attributes = try? FileManager.default.attributesOfItem(atPath: path) {
-            offset = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
-            fileID = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
-        }
+        self.offset = offset
+        fileID = Self.attributes(path).fileID
+    }
+
+    convenience init(path: String, startAtEnd: Bool) {
+        self.init(path: path, offset: startAtEnd ? Self.attributes(path).size : 0)
+    }
+
+    private static func attributes(_ path: String) -> (size: UInt64, fileID: UInt64?) {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+        return (
+            (attributes?[.size] as? NSNumber)?.uint64Value ?? 0,
+            (attributes?[.systemFileNumber] as? NSNumber)?.uint64Value
+        )
     }
 
     /// Complete lines written since the last call.
     func readNewLines() -> [String] {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else { return [] }
-        let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
-        let currentID = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
+        guard FileManager.default.fileExists(atPath: path) else { return [] }
+        let (size, currentID) = Self.attributes(path)
 
         if size < offset || (fileID != nil && currentID != fileID) {
             offset = 0
-            pending = ""
+            pending = Data()
         }
         fileID = currentID
         guard size > offset, let handle = FileHandle(forReadingAtPath: path) else { return [] }
@@ -180,10 +240,12 @@ final class LogFollower {
         try? handle.seek(toOffset: offset)
         let data = (try? handle.readToEnd()) ?? Data()
         offset += UInt64(data.count)
+        pending.append(data)
 
-        let text = pending + String(decoding: data, as: UTF8.self)
-        var lines = text.components(separatedBy: "\n")
-        pending = lines.removeLast()
-        return lines.map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
+        // Newlines are single bytes in UTF-8, so splitting there never cuts a character.
+        guard let lastNewline = pending.lastIndex(of: 0x0A) else { return [] }
+        let complete = pending[pending.startIndex...lastNewline]
+        pending = Data(pending[pending.index(after: lastNewline)...])
+        return RunnerLogs.splitLines(String(decoding: complete, as: UTF8.self))
     }
 }

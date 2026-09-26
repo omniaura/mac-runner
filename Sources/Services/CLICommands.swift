@@ -135,10 +135,11 @@ struct LogsCommand: Equatable {
     var source: RunnerLogs.Source = .output
 
     static let usage = """
-    Usage: mac-runner logs <name> [--lines N] [--follow] [--diag]
+    Usage: mac-runner logs <name> [--lines N] [--follow] [--diag | --job]
       -n, --lines N   Show the last N lines (default 50)
       -f, --follow    Keep printing new lines as they're written (Ctrl-C to stop)
-      --diag          Show the runner's newest diagnostics log (_diag) instead of its output
+      --diag          Show the runner's diagnostics log (_diag/Runner_*) instead of its output
+      --job           Show the newest job's diagnostics log (_diag/Worker_*)
     """
 
     static func parse(_ args: [String]) -> Result<LogsCommand, CLIParseError> {
@@ -160,6 +161,9 @@ struct LogsCommand: Equatable {
                 i += 1
             case "--diag":
                 command.source = .diagnostics
+                i += 1
+            case "--job":
+                command.source = .jobDiagnostics
                 i += 1
             default:
                 guard !arg.hasPrefix("-"), name == nil else {

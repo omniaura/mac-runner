@@ -116,6 +116,12 @@ class ContainerIsolationService {
                     destination: "/runner/_work"
                 )
             )
+            // Diagnostics land on the host so logs can be viewed like other modes.
+            if let diagnosticsURL = config.diagnosticsURL {
+                containerConfig.mounts.append(
+                    .share(source: diagnosticsURL.path, destination: "/runner/_diag")
+                )
+            }
 
             // Configure the runner process
             containerConfig.process.arguments = [
@@ -343,8 +349,11 @@ struct ContainerRunnerConfiguration {
     /// Whether to enable nested virtualization.
     var enableNestedVirtualization: Bool = false
 
-    /// Path to the runner workspace on the host.
+    /// Path to the runner workspace on the host (mounted at /runner/_work).
     var workspaceURL: URL
+
+    /// Host directory mounted at /runner/_diag for the runner's diagnostics logs.
+    var diagnosticsURL: URL?
 
     /// GitHub repository URL for runner registration.
     var repositoryURL: String
