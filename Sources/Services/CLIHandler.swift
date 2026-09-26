@@ -101,6 +101,10 @@ enum CLIHandler {
             await handleUninstall(args: Array(args.dropFirst()))
         case "cleanup":
             await handleCleanup(args: Array(args.dropFirst()))
+        case "schedule":
+            await handleSchedule(args: Array(args.dropFirst()))
+        case "battery":
+            await handleBattery(args: Array(args.dropFirst()))
         default:
             print("Unknown command: \(command)")
             printUsage()
@@ -129,6 +133,8 @@ enum CLIHandler {
           status            Show runner status summary
           setup             Set up dedicated user isolation
           cleanup           Remove idle runner workspaces and CI caches
+          schedule          Show or set quiet hours (daily pause window)
+          battery           Show or set pausing on low battery
           uninstall         Remove all runners and every file Mac Runner created
           help              Show this help message
           version           Show version
@@ -143,6 +149,15 @@ enum CLIHandler {
 
         SETUP OPTIONS:
           --teardown        Remove isolation (delete user, sudoers, reset config)
+
+        SCHEDULE OPTIONS:
+          --start HH:mm --end HH:mm   Pause runners daily in this window (may cross midnight)
+          --off                       Turn global quiet hours off
+          --runner <name>             Apply to one runner; also accepts --never or --global
+
+        BATTERY OPTIONS:
+          on|off                      Pause runners when on battery below the threshold
+          --threshold <percent>       Battery threshold (5-95, default 20)
 
         CLEANUP OPTIONS:
           --dry-run         Show what would be removed
@@ -168,6 +183,8 @@ enum CLIHandler {
           sudo mac-runner setup
           sudo mac-runner setup --teardown
           mac-runner cleanup --dry-run
+          mac-runner schedule --start 22:00 --end 06:00
+          mac-runner battery on --threshold 25
         """)
     }
 
@@ -420,6 +437,10 @@ enum CLIHandler {
         let authenticated = await GHCLIService.shared.checkAuth()
         print("  GitHub auth: \(authenticated ? "authenticated" : "not authenticated")")
 
+        for line in autoPauseStatusLines(manager: manager) {
+            print("  \(line)")
+        }
+
         switch manager.currentSettings.isolationMode {
         case .none:
             print("  Global isolation: disabled")
@@ -427,6 +448,111 @@ enum CLIHandler {
             print("  Global isolation: user (\(username))")
         case .container:
             print("  Global isolation: container")
+        }
+    }
+
+    @MainActor
+    static func autoPauseStatusLines(manager: RunnerManager, now: Date = Date()) -> [String] {
+        let settings = manager.currentSettings
+        var lines: [String] = []
+
+        if let quietHours = settings.quietHours, quietHours.enabled {
+            let state = quietHours.isActive(at: now) ? "active now" : "inactive"
+            lines.append("Quiet hours: \(quietHours.displayRange) (\(state))")
+        } else {
+            lines.append("Quiet hours: off")
+        }
+
+        if settings.pauseOnBattery {
+            lines.append("Low-battery pause: below \(settings.batteryPauseThreshold)%")
+        } else {
+            lines.append("Low-battery pause: off")
+        }
+
+        for runner in manager.runners.sorted(by: { $0.name < $1.name }) {
+            if let quietHours = runner.quietHours {
+                lines.append("  \(runner.name): \(quietHours.enabled ? "quiet hours \(quietHours.displayRange)" : "never pauses for quiet hours")")
+            }
+            if runner.status == .paused, let reason = runner.autoPauseReason {
+                lines.append("  \(runner.name): paused for \(reason.displayName)")
+            }
+        }
+        return lines
+    }
+
+    @MainActor
+    private static func handleSchedule(args: [String]) async {
+        let command: ScheduleCommand
+        switch ScheduleCommand.parse(args) {
+        case .success(let parsed): command = parsed
+        case .failure(let error):
+            print("Error: \(error.text)")
+            print(ScheduleCommand.usage)
+            return
+        }
+
+        let manager = RunnerManager()
+        var settings = manager.currentSettings
+
+        switch command {
+        case .show:
+            break
+        case .setGlobal(let window):
+            settings.quietHours = window
+            manager.updateSettings(settings)
+            print("Quiet hours set to \(window.displayRange) for all runners.")
+        case .disableGlobal:
+            if let current = settings.quietHours {
+                settings.quietHours = QuietHours(enabled: false, start: current.start, end: current.end)
+                manager.updateSettings(settings)
+            }
+            print("Global quiet hours turned off.")
+        case .setRunner(let name, let window):
+            guard let runner = manager.runner(named: name) else {
+                print("Error: runner '\(name)' not found")
+                return
+            }
+            manager.setQuietHours(window, for: runner.id)
+            switch window {
+            case nil: print("'\(name)' now follows the global schedule.")
+            case let window? where window.enabled: print("'\(name)' quiet hours set to \(window.displayRange).")
+            default: print("'\(name)' will not pause for quiet hours.")
+            }
+        }
+
+        for line in autoPauseStatusLines(manager: manager) {
+            print(line)
+        }
+        if command != .show {
+            print("A running Mac Runner app applies this within a few seconds.")
+        }
+    }
+
+    @MainActor
+    private static func handleBattery(args: [String]) async {
+        let command: BatteryCommand
+        switch BatteryCommand.parse(args) {
+        case .success(let parsed): command = parsed
+        case .failure(let error):
+            print("Error: \(error.text)")
+            print(BatteryCommand.usage)
+            return
+        }
+
+        let manager = RunnerManager()
+        if case .set(let enabled, let threshold) = command {
+            var settings = manager.currentSettings
+            if let enabled { settings.pauseOnBattery = enabled }
+            if let threshold { settings.batteryPauseThreshold = threshold }
+            manager.updateSettings(settings)
+        }
+
+        let settings = manager.currentSettings
+        print("Low-battery pause: \(settings.pauseOnBattery ? "on" : "off") (threshold \(settings.batteryPauseThreshold)%)")
+        if let power = PowerSourceMonitor().currentState() {
+            print("Battery: \(power.batteryLevel)% \(power.isOnBattery ? "(on battery)" : "(on AC power)")")
+        } else {
+            print("Battery: none detected on this Mac")
         }
     }
 

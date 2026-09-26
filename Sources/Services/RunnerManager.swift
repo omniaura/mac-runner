@@ -30,6 +30,10 @@ class RunnerManager: ObservableObject {
     @Published private(set) var isInstallingUpdate = false
     @Published private(set) var updateStatusMessage = UpdateStatusMessages.defaultAutomaticChecks
     @Published private(set) var gitHubAuthIssue: String?
+    /// Internal battery state; nil on Macs without a battery.
+    @Published private(set) var powerState: PowerState?
+    /// Busy runners that will pause as soon as their current job finishes.
+    @Published private(set) var pendingAutoPauses: [UUID: AutoPauseReason] = [:]
 
     private let configService = ConfigService()
     private let ghService = GHCLIService.shared
@@ -71,6 +75,16 @@ class RunnerManager: ObservableObject {
     private let restartMaxDelaySeconds = 60
     private var installedUpdateVersion: String?
     private var lastAutomaticDiskCleanupCheck: Date?
+    private let powerMonitor = PowerSourceMonitor()
+    /// Only the menu bar app pauses/resumes runners automatically; one-shot CLI
+    /// commands also construct a RunnerManager and must not.
+    private var automationEnabled = false
+    private var isEvaluatingAutoPause = false
+    /// Runners started by hand while an auto-pause condition applied. Left
+    /// running until that condition clears.
+    private var autoPauseOverrides: Set<UUID> = []
+    private var lastConfigModificationDate: Date?
+    private var powerSourceObserver: NSObjectProtocol?
 
     /// Initialize the RunnerManager and restore runtime state.
     ///
@@ -189,6 +203,7 @@ class RunnerManager: ObservableObject {
             let config = try configService.loadConfig()
             runners = config.runners
             currentSettings = config.settings
+            lastConfigModificationDate = configService.modificationDate()
         } catch {
             self.error = "Failed to load config: \(error.localizedDescription)"
         }
@@ -202,6 +217,7 @@ class RunnerManager: ObservableObject {
         do {
             let config = RunnerConfig(runners: runners, settings: currentSettings)
             try configService.saveConfig(config)
+            lastConfigModificationDate = configService.modificationDate()
         } catch {
             self.error = "Failed to save config: \(error.localizedDescription)"
         }
@@ -572,6 +588,8 @@ class RunnerManager: ObservableObject {
         scheduledRestarts[id]?.cancel()
         scheduledRestarts.removeValue(forKey: id)
         restartAttemptHistory.removeValue(forKey: id)
+        pendingAutoPauses.removeValue(forKey: id)
+        autoPauseOverrides.remove(id)
 
         // Remove from list
         runners.removeAll(where: { $0.id == id })
@@ -734,6 +752,12 @@ class RunnerManager: ObservableObject {
 
         // A freshly started runner hasn't picked up a job yet.
         runners[index].busy = false
+        if runners[index].autoPauseReason != nil {
+            // Started by hand while auto-paused: keep it running until the
+            // pause condition clears instead of pausing it again next tick.
+            autoPauseOverrides.insert(id)
+            runners[index].autoPauseReason = nil
+        }
         runners[index].status = .running
         saveConfiguration()
     }
@@ -832,6 +856,240 @@ class RunnerManager: ObservableObject {
         }
     }
 
+    // MARK: - Auto-Pause
+
+    /// Start pausing and resuming runners for low battery and quiet hours.
+    /// Called by the menu bar app; evaluation then runs on every status poll
+    /// and whenever the power source changes.
+    func startAutomation() {
+        guard !automationEnabled else { return }
+        automationEnabled = true
+        powerMonitor.startObserving()
+        powerSourceObserver = NotificationCenter.default.addObserver(
+            forName: .powerSourceDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.evaluateAutoPause()
+            }
+        }
+        Task { await evaluateAutoPause() }
+    }
+
+    /// Pause runners whose auto-pause condition applies and resume the ones
+    /// Mac Runner paused once it no longer does. Busy runners finish their
+    /// current job first.
+    func evaluateAutoPause(now: Date = Date()) async {
+        guard !isEvaluatingAutoPause else { return }
+        isEvaluatingAutoPause = true
+        defer { isEvaluatingAutoPause = false }
+
+        powerState = powerMonitor.currentState()
+        var paused: [AutoPauseReason: [String]] = [:]
+        var resumed: [String] = []
+
+        for id in runners.map(\.id) {
+            guard let runner = runners.first(where: { $0.id == id }) else { continue }
+            let reason = AutoPausePolicy.reason(for: runner, settings: currentSettings, power: powerState, now: now)
+
+            guard let reason else {
+                autoPauseOverrides.remove(id)
+                pendingAutoPauses.removeValue(forKey: id)
+                guard runner.status == .paused, runner.autoPauseReason != nil else { continue }
+                if await resumeAutoPausedRunner(id) {
+                    resumed.append(runner.name)
+                }
+                continue
+            }
+
+            if autoPauseOverrides.contains(id) || runner.status != .running {
+                pendingAutoPauses.removeValue(forKey: id)
+                if runner.status == .paused, let current = runner.autoPauseReason, current != reason,
+                   let index = runners.firstIndex(where: { $0.id == id }) {
+                    runners[index].autoPauseReason = reason
+                    saveConfiguration()
+                }
+                continue
+            }
+
+            if runner.busy {
+                if pendingAutoPauses[id] == nil {
+                    logRunnerEvent(for: runner, message: "Will pause for \(reason.displayName) after the current job.")
+                }
+                pendingAutoPauses[id] = reason
+                continue
+            }
+
+            if await autoPauseRunner(id, reason: reason) {
+                paused[reason, default: []].append(runner.name)
+            }
+        }
+
+        await notifyAutoPauseChanges(paused: paused, resumed: resumed)
+    }
+
+    private func autoPauseRunner(_ id: UUID, reason: AutoPauseReason) async -> Bool {
+        do {
+            try await stopRunner(id)
+        } catch {
+            if let runner = runners.first(where: { $0.id == id }) {
+                logRunnerEvent(for: runner, message: "Auto-pause for \(reason.displayName) failed: \(error.localizedDescription)")
+            }
+            return false
+        }
+
+        pendingAutoPauses.removeValue(forKey: id)
+        guard let index = runners.firstIndex(where: { $0.id == id }) else { return false }
+        runners[index].status = .paused
+        runners[index].autoPauseReason = reason
+        saveConfiguration()
+        logRunnerEvent(for: runners[index], message: "Paused for \(reason.displayName).")
+        return true
+    }
+
+    private func resumeAutoPausedRunner(_ id: UUID) async -> Bool {
+        guard let index = runners.firstIndex(where: { $0.id == id }) else { return false }
+        // Clear first so startRunner doesn't treat this as a manual override.
+        runners[index].autoPauseReason = nil
+
+        do {
+            try await startRunner(id)
+            if let runner = runners.first(where: { $0.id == id }) {
+                logRunnerEvent(for: runner, message: "Resumed after auto-pause.")
+            }
+            return true
+        } catch {
+            if let refreshedIndex = runners.firstIndex(where: { $0.id == id }) {
+                runners[refreshedIndex].status = .error
+                runners[refreshedIndex].lastRestartEvent = "Auto-resume failed: \(error.localizedDescription)"
+                logRunnerEvent(for: runners[refreshedIndex], message: runners[refreshedIndex].lastRestartEvent ?? "")
+                saveConfiguration()
+            }
+            return false
+        }
+    }
+
+    private func notifyAutoPauseChanges(paused: [AutoPauseReason: [String]], resumed: [String]) async {
+        guard currentSettings.notificationsEnabled else { return }
+
+        for (reason, names) in paused.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            let detail: String
+            switch reason {
+            case .lowBattery:
+                let level = powerState.map { "\($0.batteryLevel)%" } ?? "low"
+                detail = "Battery at \(level). They resume when charging or above \(currentSettings.batteryPauseThreshold)%."
+            case .quietHours:
+                detail = "Quiet hours are active. They resume when the window ends."
+            }
+            await jobNotificationService.notifyStatus(
+                identifier: "auto-pause-\(reason.rawValue)",
+                title: Self.runnerCountTitle(verb: "Paused", names: names),
+                body: detail
+            )
+        }
+
+        if !resumed.isEmpty {
+            await jobNotificationService.notifyStatus(
+                identifier: "auto-resume",
+                title: Self.runnerCountTitle(verb: "Resumed", names: resumed),
+                body: resumed.sorted().joined(separator: ", ")
+            )
+        }
+    }
+
+    nonisolated static func runnerCountTitle(verb: String, names: [String]) -> String {
+        names.count == 1 ? "\(verb) \(names[0])" : "\(verb) \(names.count) runners"
+    }
+
+    /// Short status for a runner's auto-pause state, for the runner list.
+    func autoPauseStatus(for runner: Runner, now: Date = Date()) -> String? {
+        if runner.status == .paused, let reason = runner.autoPauseReason {
+            switch reason {
+            case .lowBattery:
+                return "Paused: battery below \(currentSettings.batteryPauseThreshold)%"
+            case .quietHours:
+                let end = runner.effectiveQuietHours(global: currentSettings.quietHours)?.end
+                return end.map { "Paused for quiet hours until \($0)" } ?? "Paused for quiet hours"
+            }
+        }
+        if let reason = pendingAutoPauses[runner.id] {
+            return "Pausing for \(reason.displayName) after the current job"
+        }
+        if runner.status == .running, autoPauseOverrides.contains(runner.id) {
+            return "Running during \(AutoPausePolicy.reason(for: runner, settings: currentSettings, power: powerState, now: now)?.displayName ?? "pause window") (started manually)"
+        }
+        return nil
+    }
+
+    /// Global auto-pause status for the menu header, or nil when nothing is configured.
+    func autoPauseSummary(now: Date = Date()) -> (text: String, isActive: Bool)? {
+        if AutoPausePolicy.isBatteryLow(settings: currentSettings, power: powerState), let powerState {
+            return ("On battery at \(powerState.batteryLevel)% — runners paused until charging", true)
+        }
+        if let quietHours = currentSettings.quietHours, quietHours.enabled, quietHours.isValid {
+            if quietHours.contains(now) {
+                return ("Quiet hours active until \(quietHours.end)", true)
+            }
+            return ("Quiet hours \(quietHours.displayRange)", false)
+        }
+        return nil
+    }
+
+    /// Set or clear a runner's own pause schedule (nil = use the global one).
+    func setQuietHours(_ quietHours: QuietHours?, for id: UUID) {
+        guard let index = runners.firstIndex(where: { $0.id == id }) else { return }
+        runners[index].quietHours = quietHours
+        saveConfiguration()
+        if automationEnabled {
+            Task { await evaluateAutoPause() }
+        }
+    }
+
+    // MARK: - External Config Changes
+
+    /// Pick up settings and runner edits another process (the CLI) wrote to the
+    /// config file since we last read or wrote it. Runtime state we own
+    /// (processes, busy flags, restart events) is kept.
+    func reloadExternalConfigChanges() {
+        guard let modified = configService.modificationDate(),
+              modified != lastConfigModificationDate,
+              let config = try? configService.loadConfig() else {
+            return
+        }
+        lastConfigModificationDate = modified
+        currentSettings = config.settings
+        runners = Self.merge(
+            diskRunners: config.runners,
+            into: runners,
+            ownedRuntimeIDs: Set(runnerProcesses.keys).union(runnerContainers.keys)
+        )
+    }
+
+    /// Merge runners read from disk with the in-memory list. Disk wins for
+    /// configuration; memory keeps runtime state. Status comes from disk only
+    /// for runners this process isn't running itself.
+    nonisolated static func merge(diskRunners: [Runner], into memoryRunners: [Runner], ownedRuntimeIDs: Set<UUID>) -> [Runner] {
+        diskRunners.map { diskRunner in
+            guard var merged = memoryRunners.first(where: { $0.id == diskRunner.id }) else {
+                return diskRunner
+            }
+            merged.name = diskRunner.name
+            merged.labels = diskRunner.labels
+            merged.enabled = diskRunner.enabled
+            merged.isolationMode = diskRunner.isolationMode
+            merged.enableGUI = diskRunner.enableGUI
+            merged.openFileLimit = diskRunner.openFileLimit
+            merged.quietHours = diskRunner.quietHours
+            merged.githubRunnerId = diskRunner.githubRunnerId ?? merged.githubRunnerId
+            if !ownedRuntimeIDs.contains(diskRunner.id) {
+                merged.status = diskRunner.status
+                merged.autoPauseReason = diskRunner.autoPauseReason
+            }
+            return merged
+        }
+    }
+
     // MARK: - Lookup
 
     /// Find a runner by name.
@@ -922,6 +1180,11 @@ class RunnerManager: ObservableObject {
         }
 
         runAutomaticDiskCleanupIfNeeded()
+
+        if automationEnabled {
+            reloadExternalConfigChanges()
+            await evaluateAutoPause()
+        }
     }
 
     private func runAutomaticDiskCleanupIfNeeded(now: Date = Date()) {

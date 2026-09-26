@@ -38,6 +38,12 @@ class ConfigService {
         return try JSONDecoder().decode(RunnerConfig.self, from: data)
     }
 
+    /// Last modification time of the config file, used to notice edits made by
+    /// another process (e.g. the CLI while the menu bar app is running).
+    func modificationDate() -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: configFile.path))?[.modificationDate] as? Date
+    }
+
     func saveConfig(_ config: RunnerConfig) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

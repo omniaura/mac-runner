@@ -88,6 +88,21 @@ final class JobNotificationService: NSObject, @preconcurrency UNUserNotification
         notificationCenter.add(request, withCompletionHandler: nil)
     }
 
+    /// Post a general status notification (e.g. runners auto-paused).
+    /// Reusing `identifier` replaces the previous notification of that kind.
+    func notifyStatus(identifier: String, title: String, body: String) async {
+        guard let notificationCenter else { return }
+        requestAuthorizationIfNeeded()
+
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        notificationCenter.add(
+            UNNotificationRequest(identifier: identifier, content: content, trigger: nil),
+            withCompletionHandler: nil
+        )
+    }
+
     private func requestAuthorizationIfNeeded() {
         requestAuthorizationIfNeededInternal()
     }
