@@ -35,28 +35,32 @@ enum ProcessUtils {
     ///
     /// - Parameters:
     ///   - pid: The root process ID to kill
-    ///   - useSudo: If true, uses sudo to kill processes (required for killing processes owned by other users)
-    static func killProcessTree(_ pid: pid_t, useSudo: Bool = false) {
-        let allPids = findDescendants(of: pid) + [pid]
+    ///   - serviceUser: Dedicated isolation user that owns the tree. Its processes
+    ///     are signalled as that user via the passwordless `sudo -u` shell entry;
+    ///     the root `sudo` wrapper at the top of the tree exits with its child.
+    static func killProcessTree(_ pid: pid_t, serviceUser: String? = nil) {
+        let allPids = Array((findDescendants(of: pid) + [pid]).reversed())
 
-        // Kill deepest children first
-        for p in allPids.reversed() {
-            if useSudo {
-                let killProc = Process()
-                killProc.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-                killProc.arguments = ["-n", "kill", "-TERM", String(p)]
-                killProc.standardOutput = FileHandle.nullDevice
-                killProc.standardError = FileHandle.nullDevice
-                do {
-                    try killProc.run()
-                } catch {
-                    // Log failure but continue with remaining processes
-                    print("Warning: Failed to kill process \(p): \(error)")
-                }
-                killProc.waitUntilExit()
-            } else {
+        guard let serviceUser else {
+            for p in allPids {
                 kill(p, SIGTERM)
             }
+            return
         }
+
+        let command = killCommand(for: allPids)
+        do {
+            _ = try ProcessExecutor.run(
+                "/usr/bin/sudo",
+                arguments: UserIsolationService.sudoShellArguments(username: serviceUser, shell: "/bin/bash", command: command)
+            )
+        } catch {
+            print("Warning: Failed to kill process tree \(pid): \(error)")
+        }
+    }
+
+    /// Shell command that sends SIGTERM to each PID, continuing past ones it can't signal.
+    static func killCommand(for pids: [pid_t]) -> String {
+        "kill -TERM \(pids.map(String.init).joined(separator: " ")) 2>/dev/null; true"
     }
 }

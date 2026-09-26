@@ -68,17 +68,19 @@ class ProcessManager {
                 owner: username
             )
 
-            // Create log file and set ownership
-            FileManager.default.createFile(atPath: logFile, contents: nil)
-
-            // Set ownership via sudo chown
-            let chown = Process()
-            chown.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-            chown.arguments = ["-n", "chown", "\(username):staff", logFile]
-            chown.standardOutput = FileHandle.nullDevice
-            chown.standardError = FileHandle.nullDevice
-            try chown.run()
-            chown.waitUntilExit()
+            // The workspace is owned by the service user, so it creates the log.
+            // Group-writable so the host user (in staff) can open it for the
+            // runner's output and append its own events.
+            let escapedLog = logFile.replacingOccurrences(of: "'", with: "'\\''")
+            try ProcessExecutor.runOrThrow(
+                "/usr/bin/sudo",
+                arguments: UserIsolationService.sudoShellArguments(
+                    username: username,
+                    shell: "/bin/bash",
+                    command: "touch '\(escapedLog)' && chmod 664 '\(escapedLog)'"
+                ),
+                errorMessage: "Failed to create runner log"
+            )
 
             // Open log file for writing
             guard let logHandle = FileHandle(forWritingAtPath: logFile) else {
@@ -137,14 +139,12 @@ class ProcessManager {
         }
 
         // Kill process tree based on isolation mode
-        let useSudo: Bool
         switch isolation {
         case .none, .container:
-            useSudo = false
-        case .dedicatedUser:
-            useSudo = true
+            ProcessUtils.killProcessTree(actualPid)
+        case .dedicatedUser(let username):
+            ProcessUtils.killProcessTree(actualPid, serviceUser: username)
         }
-        ProcessUtils.killProcessTree(actualPid, useSudo: useSudo)
 
         // Clean up PID file
         pidManager.removePID(for: id)

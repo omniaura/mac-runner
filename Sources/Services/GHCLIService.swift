@@ -49,6 +49,17 @@ struct GitHubAuthRecovery: Sendable, Equatable {
     static let adminOrgRefreshCommand = "gh auth refresh -h github.com -s admin:org"
 }
 
+/// Holds pipe output collected on a background queue.
+private final class LockedData: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    var value: Data {
+        get { lock.withLock { data } }
+        set { lock.withLock { data = newValue } }
+    }
+}
+
 final class GHCLIService: Sendable {
     static let shared = GHCLIService()
 
@@ -88,15 +99,24 @@ final class GHCLIService: Sendable {
 
                 do {
                     try process.run()
-                    process.waitUntilExit()
 
+                    // Drain both pipes before waiting for exit. gh blocks once a
+                    // pipe's buffer fills, so waiting first deadlocks on large
+                    // responses (e.g. listing an org's runners).
+                    let stderrData = LockedData()
+                    let stderrDrained = DispatchSemaphore(value: 0)
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        stderrData.value = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                        stderrDrained.signal()
+                    }
                     let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                    stderrDrained.wait()
+                    process.waitUntilExit()
 
                     let result = ProcessResult(
                         exitCode: process.terminationStatus,
                         stdout: String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
-                        stderr: String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        stderr: String(data: stderrData.value, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     )
                     continuation.resume(returning: result)
                 } catch {
