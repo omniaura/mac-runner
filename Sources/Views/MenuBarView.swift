@@ -45,6 +45,19 @@ struct MenuBarView: View {
                 runnerList
             }
 
+            if runnerManager.resourceUsage.count > 1 {
+                HStack(spacing: 4) {
+                    Image(systemName: "sum")
+                    Text("All runners: \(runnerManager.totalResourceUsage.summary)")
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+            }
+
             Divider()
 
             // Actions
@@ -407,6 +420,14 @@ struct RunnerRow: View {
                     }
                 }
 
+                if runner.status == .running, let usage = runnerManager.resourceUsage[runner.id] {
+                    Label(usage.summary, systemImage: "gauge.with.dots.needle.33percent")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .help("\(usage.processCount) processes")
+                }
+
                 if let autoPauseStatus = runnerManager.autoPauseStatus(for: runner) {
                     Text(autoPauseStatus)
                         .font(.caption2)
@@ -614,6 +635,8 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
 
                     AutoPauseSettingsSection()
+
+                    ResourceAlertSettingsSection()
 
                     Toggle("Job Notifications", isOn: Binding(
                         get: { runnerManager.currentSettings.notificationsEnabled },

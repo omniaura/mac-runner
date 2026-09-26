@@ -94,7 +94,7 @@ enum CLIHandler {
         case "stop":
             await handleStop(args: Array(args.dropFirst()))
         case "status":
-            await handleStatus()
+            await handleStatus(args: Array(args.dropFirst()))
         case "setup":
             await handleSetup(args: Array(args.dropFirst()))
         case "uninstall":
@@ -132,7 +132,7 @@ enum CLIHandler {
           remove <name>     Remove a runner
           start <name>      Start a runner
           stop <name>       Stop a runner
-          status            Show runner status summary
+          status            Show runner status summary (--resources for CPU/memory/disk)
           setup             Set up dedicated user isolation
           cleanup           Remove idle runner workspaces and CI caches
           logs <name>       Show a runner's logs (--follow to stream, --diag for diagnostics)
@@ -193,6 +193,7 @@ enum CLIHandler {
           sudo mac-runner setup --teardown
           mac-runner cleanup --dry-run
           mac-runner logs my-runner --follow
+          mac-runner status --resources
           mac-runner schedule --start 22:00 --end 06:00
           mac-runner battery on --threshold 25
         """)
@@ -428,9 +429,15 @@ enum CLIHandler {
     }
 
     @MainActor
-    private static func handleStatus() async {
+    private static func handleStatus(args: [String]) async {
         let manager = RunnerManager()
         let runners = manager.runners
+
+        if args.contains("--resources") {
+            await manager.refreshResourceUsage(measureDisk: true)
+            print(resourceTable(runners: runners, usage: manager.resourceUsage))
+            return
+        }
 
         let running = runners.filter { $0.status == .running }.count
         let stopped = runners.filter { $0.status == .stopped }.count
@@ -459,6 +466,32 @@ enum CLIHandler {
         case .container:
             print("  Global isolation: container")
         }
+    }
+
+    /// `mac-runner status --resources` output.
+    static func resourceTable(runners: [Runner], usage: [UUID: RunnerResourceUsage]) -> String {
+        let running = runners.filter { $0.status == .running || usage[$0.id] != nil }.sorted { $0.name < $1.name }
+        guard !running.isEmpty else { return "No running runners." }
+
+        var rows = [["NAME", "CPU", "MEMORY", "DISK", "PROCS"]]
+        for runner in running {
+            guard let item = usage[runner.id] else {
+                // e.g. a container runner whose VM lives in another Mac Runner process.
+                rows.append([runner.name, "-", "-", "-", "-"])
+                continue
+            }
+            rows.append([runner.name, item.cpuText, item.memoryText, item.diskText ?? "-", "\(item.processCount)"])
+        }
+        let total = RunnerResourceUsage.total(running.compactMap { usage[$0.id] })
+        rows.append(["TOTAL", total.cpuText, total.memoryText, total.diskText ?? "-", "\(total.processCount)"])
+
+        let widths = (0..<rows[0].count).map { column in rows.map { $0[column].count }.max() ?? 0 }
+        return rows.map { row in
+            row.enumerated().map { column, value in
+                column == 0 ? value.padding(toLength: widths[column], withPad: " ", startingAt: 0)
+                    : String(repeating: " ", count: widths[column] - value.count) + value
+            }.joined(separator: "  ")
+        }.joined(separator: "\n")
     }
 
     @MainActor

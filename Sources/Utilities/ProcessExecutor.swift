@@ -51,6 +51,50 @@ enum ProcessExecutor {
         return ProcessResult(terminationStatus: process.terminationStatus, output: output)
     }
 
+    /// Execute a process, capturing output, and terminate it if it runs longer
+    /// than `timeout`. Returns nil on timeout.
+    static func run(_ executable: String, arguments: [String], timeout: TimeInterval) throws -> ProcessResult? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+        try process.run()
+
+        // Drain output concurrently so a chatty process can't block on a full pipe.
+        let output = LockedOutput()
+        let drained = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            output.data = pipe.fileHandleForReading.readDataToEndOfFile()
+            drained.signal()
+        }
+
+        guard finished.wait(timeout: .now() + timeout) == .success else {
+            process.terminate()
+            if finished.wait(timeout: .now() + 2) == .timedOut {
+                // Ignored SIGTERM: kill it so it (and our pipe reader) can't linger.
+                kill(process.processIdentifier, SIGKILL)
+                _ = finished.wait(timeout: .now() + 2)
+            }
+            return nil
+        }
+        drained.wait()
+        return ProcessResult(terminationStatus: process.terminationStatus, output: output.data.asUTF8String)
+    }
+
+    private final class LockedOutput: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = Data()
+        var data: Data {
+            get { lock.withLock { value } }
+            set { lock.withLock { value = newValue } }
+        }
+    }
+
     /// Execute a process with sudo and capture output
     /// - Parameters:
     ///   - arguments: Arguments to pass to sudo (executable and its args)
