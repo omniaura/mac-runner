@@ -754,6 +754,10 @@ class RunnerManager: ObservableObject {
             }
         }
 
+        // The runner list can be replaced while we awaited (e.g. a config
+        // reload after the CLI removed another runner), so look it up again.
+        guard let index = runners.firstIndex(where: { $0.id == id }) else { return }
+
         // A freshly started runner hasn't picked up a job yet.
         runners[index].busy = false
         if let reason = runners[index].autoPauseReason {
@@ -825,6 +829,8 @@ class RunnerManager: ObservableObject {
         restartAttemptHistory.removeValue(forKey: id)
         launchTokens.removeValue(forKey: id)
 
+        // Look the runner up again: the list can be replaced during the awaits above.
+        guard let index = runners.firstIndex(where: { $0.id == id }) else { return }
         runners[index].status = .stopped
         runners[index].autoPauseOverride = nil
         // A stopped runner isn't executing anything; don't let a stale flag
