@@ -102,6 +102,11 @@ final class ResourceMonitorTests: XCTestCase {
         XCTAssertNil(try ProcessExecutor.run("/bin/sleep", arguments: ["30"], timeout: 0.5))
         XCTAssertLessThan(Date().timeIntervalSince(start), 5)
         XCTAssertEqual(try ProcessExecutor.run("/bin/echo", arguments: ["hi"], timeout: 5)?.output, "hi\n")
+
+        // A process that ignores SIGTERM is killed.
+        let stubborn = Date()
+        XCTAssertNil(try ProcessExecutor.run("/bin/bash", arguments: ["-c", "trap '' TERM; sleep 30"], timeout: 0.5))
+        XCTAssertLessThan(Date().timeIntervalSince(stubborn), 8)
     }
 
     func testSettingsDecodeWithoutResourceAlerts() throws {

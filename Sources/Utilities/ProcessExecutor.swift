@@ -75,7 +75,11 @@ enum ProcessExecutor {
 
         guard finished.wait(timeout: .now() + timeout) == .success else {
             process.terminate()
-            _ = finished.wait(timeout: .now() + 2)
+            if finished.wait(timeout: .now() + 2) == .timedOut {
+                // Ignored SIGTERM: kill it so it (and our pipe reader) can't linger.
+                kill(process.processIdentifier, SIGKILL)
+                _ = finished.wait(timeout: .now() + 2)
+            }
             return nil
         }
         drained.wait()
