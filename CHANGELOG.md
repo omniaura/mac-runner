@@ -1,3 +1,15 @@
+# [1.24.0](https://github.com/omniaura/mac-runner/compare/v1.23.0...v1.24.0) (2026-09-26)
+
+
+### Bug Fixes
+
+* only register a GUI container runner once its display accepts connections ([#95](https://github.com/omniaura/mac-runner/issues/95)) ([164d5a3](https://github.com/omniaura/mac-runner/commit/164d5a382bfc7f548ce2ac0963f1a2d06498821f)), closes [#93](https://github.com/omniaura/mac-runner/issues/93)
+
+
+### Features
+
+* give GUI container runners their own virtual display ([#93](https://github.com/omniaura/mac-runner/issues/93)) ([c98499f](https://github.com/omniaura/mac-runner/commit/c98499f9a03c3815e33032228d8c550d52e0688c)), closes [#27](https://github.com/omniaura/mac-runner/issues/27)
+
 # [1.23.0](https://github.com/omniaura/mac-runner/compare/v1.22.0...v1.23.0) (2026-09-26)
 
 
