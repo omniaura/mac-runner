@@ -71,6 +71,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         .store(in: &cancellables)
 
         Task { await runnerManager.autoRestartRunners() }
+        runnerManager.startAutomation()
         Task { await runnerManager.checkForUpdates() }
     }
 

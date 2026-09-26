@@ -15,7 +15,7 @@ enum RunnerScope: String, Codable, Sendable {
     }
 }
 
-struct Runner: Identifiable, Codable, Sendable {
+struct Runner: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
     var name: String
     /// Target identifier. For `.repo` scope this is "owner/repo"; for `.org` scope this is the org login.
@@ -32,6 +32,11 @@ struct Runner: Identifiable, Codable, Sendable {
     var enableGUI: Bool  // Whether to enable GUI access for this runner (default: false, headless)
     var lastRestartEvent: String?
     var openFileLimit: Int?  // Per-runner override for max open files (nil = use global setting)
+    var quietHours: QuietHours?  // Per-runner pause schedule (nil = use global setting)
+    var autoPauseReason: AutoPauseReason?  // Set while Mac Runner has paused this runner automatically
+    /// Set when the runner was started by hand while paused for this reason; it
+    /// keeps running until that condition clears. Persisted so a CLI start holds too.
+    var autoPauseOverride: AutoPauseReason?
 
     init(
         id: UUID = UUID(),
@@ -46,7 +51,9 @@ struct Runner: Identifiable, Codable, Sendable {
         isolationMode: IsolationMode? = nil,
         enableGUI: Bool = false,
         lastRestartEvent: String? = nil,
-        openFileLimit: Int? = nil
+        openFileLimit: Int? = nil,
+        quietHours: QuietHours? = nil,
+        autoPauseReason: AutoPauseReason? = nil
     ) {
         self.id = id
         self.name = name
@@ -61,6 +68,8 @@ struct Runner: Identifiable, Codable, Sendable {
         self.enableGUI = enableGUI
         self.lastRestartEvent = lastRestartEvent
         self.openFileLimit = ResourceLimits.normalizedOpenFileLimit(openFileLimit)
+        self.quietHours = quietHours
+        self.autoPauseReason = autoPauseReason
     }
 
     init(from decoder: Decoder) throws {
@@ -85,6 +94,61 @@ struct Runner: Identifiable, Codable, Sendable {
         openFileLimit = ResourceLimits.normalizedOpenFileLimit(
             try container.decodeIfPresent(Int.self, forKey: .openFileLimit)
         )
+        quietHours = try container.decodeIfPresent(QuietHours.self, forKey: .quietHours)
+        autoPauseReason = try container.decodeIfPresent(AutoPauseReason.self, forKey: .autoPauseReason)
+        autoPauseOverride = try container.decodeIfPresent(AutoPauseReason.self, forKey: .autoPauseOverride)
+    }
+
+    /// User-editable settings, compared when reconciling concurrent config edits.
+    struct Configuration: Equatable {
+        var name: String
+        var repo: String
+        var scope: RunnerScope
+        var labels: [String]
+        var enabled: Bool
+        var githubRunnerId: Int?
+        var isolationMode: IsolationMode?
+        var enableGUI: Bool
+        var openFileLimit: Int?
+        var quietHours: QuietHours?
+    }
+
+    var configuration: Configuration {
+        get {
+            Configuration(
+                name: name, repo: repo, scope: scope, labels: labels, enabled: enabled,
+                githubRunnerId: githubRunnerId, isolationMode: isolationMode, enableGUI: enableGUI,
+                openFileLimit: openFileLimit, quietHours: quietHours
+            )
+        }
+        set {
+            name = newValue.name
+            repo = newValue.repo
+            scope = newValue.scope
+            labels = newValue.labels
+            enabled = newValue.enabled
+            githubRunnerId = newValue.githubRunnerId
+            isolationMode = newValue.isolationMode
+            enableGUI = newValue.enableGUI
+            openFileLimit = newValue.openFileLimit
+            quietHours = newValue.quietHours
+        }
+    }
+
+    /// Persisted run state, compared when reconciling concurrent config edits.
+    struct PersistedState: Equatable {
+        var status: RunnerStatus
+        var autoPauseReason: AutoPauseReason?
+        var autoPauseOverride: AutoPauseReason?
+    }
+
+    var persistedState: PersistedState {
+        get { PersistedState(status: status, autoPauseReason: autoPauseReason, autoPauseOverride: autoPauseOverride) }
+        set {
+            status = newValue.status
+            autoPauseReason = newValue.autoPauseReason
+            autoPauseOverride = newValue.autoPauseOverride
+        }
     }
 
     /// Convenience target descriptor pairing this runner's scope and identifier.
@@ -105,6 +169,11 @@ struct Runner: Identifiable, Codable, Sendable {
 
     func effectiveOpenFileLimit(global globalLimit: Int) -> Int {
         openFileLimit ?? globalLimit
+    }
+
+    /// The pause schedule that applies to this runner: its own, or the global one.
+    func effectiveQuietHours(global globalQuietHours: QuietHours?) -> QuietHours? {
+        quietHours ?? globalQuietHours
     }
 }
 
@@ -166,7 +235,7 @@ enum RunnerStatus: String, Codable, Sendable {
     }
 }
 
-struct RunnerConfig: Codable, Sendable {
+struct RunnerConfig: Codable, Sendable, Equatable {
     var runners: [Runner]
     var settings: AppSettings
 
@@ -239,9 +308,11 @@ enum IsolationMode: Codable, Sendable, Equatable {
     }
 }
 
-struct AppSettings: Codable, Sendable {
+struct AppSettings: Codable, Sendable, Equatable {
     var startOnLogin: Bool
     var pauseOnBattery: Bool
+    /// Battery percentage below which runners pause when `pauseOnBattery` is on.
+    var batteryPauseThreshold: Int
     var quietHours: QuietHours?
     var isolationMode: IsolationMode
     var tools: ToolProvisioningSettings
@@ -256,6 +327,7 @@ struct AppSettings: Codable, Sendable {
     static let `default` = AppSettings(
         startOnLogin: false,
         pauseOnBattery: false,
+        batteryPauseThreshold: AppSettings.defaultBatteryPauseThreshold,
         quietHours: nil,
         isolationMode: .none,
         tools: .default,
@@ -268,9 +340,17 @@ struct AppSettings: Codable, Sendable {
         openFileLimit: ResourceLimits.defaultOpenFileLimit
     )
 
+    static let defaultBatteryPauseThreshold = 20
+    static let batteryPauseThresholdRange = 5...95
+
+    static func normalizedBatteryPauseThreshold(_ value: Int) -> Int {
+        min(max(value, batteryPauseThresholdRange.lowerBound), batteryPauseThresholdRange.upperBound)
+    }
+
     init(
         startOnLogin: Bool = false,
         pauseOnBattery: Bool = false,
+        batteryPauseThreshold: Int = AppSettings.defaultBatteryPauseThreshold,
         quietHours: QuietHours? = nil,
         isolationMode: IsolationMode = .none,
         tools: ToolProvisioningSettings = .default,
@@ -284,6 +364,7 @@ struct AppSettings: Codable, Sendable {
     ) {
         self.startOnLogin = startOnLogin
         self.pauseOnBattery = pauseOnBattery
+        self.batteryPauseThreshold = Self.normalizedBatteryPauseThreshold(batteryPauseThreshold)
         self.quietHours = quietHours
         self.isolationMode = isolationMode
         self.tools = tools
@@ -300,10 +381,11 @@ struct AppSettings: Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         startOnLogin = try container.decodeIfPresent(Bool.self, forKey: .startOnLogin) ?? false
         pauseOnBattery = try container.decodeIfPresent(Bool.self, forKey: .pauseOnBattery) ?? false
+        batteryPauseThreshold = Self.normalizedBatteryPauseThreshold(
+            try container.decodeIfPresent(Int.self, forKey: .batteryPauseThreshold) ?? Self.defaultBatteryPauseThreshold
+        )
         quietHours = try container.decodeIfPresent(QuietHours.self, forKey: .quietHours)
         isolationMode = try container.decodeIfPresent(IsolationMode.self, forKey: .isolationMode) ?? .none
-        tools = try container.decodeIfPresent(ToolProvisioningSettings.self, forKey: .tools) ?? .default
-        notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         tools = try container.decodeIfPresent(ToolProvisioningSettings.self, forKey: .tools) ?? .default
         notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         autoCheckForUpdates = try container.decodeIfPresent(Bool.self, forKey: .autoCheckForUpdates) ?? true
@@ -351,8 +433,102 @@ struct ToolProvisioningSettings: Codable, Sendable, Equatable {
     }
 }
 
-struct QuietHours: Codable, Sendable {
+/// A daily window during which runners are paused. Windows may wrap past
+/// midnight (e.g. 22:00-06:00). `start == end` means the whole day.
+struct QuietHours: Codable, Sendable, Equatable {
     var enabled: Bool
     var start: String  // HH:mm format
     var end: String    // HH:mm format
+
+    /// Minutes after midnight for an "HH:mm" string, or nil if malformed.
+    static func minutes(from time: String) -> Int? {
+        let parts = time.trimmingCharacters(in: .whitespaces).split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              parts.allSatisfy({ (1...2).contains($0.count) && $0.allSatisfy(\.isNumber) }),
+              let hour = Int(parts[0]), let minute = Int(parts[1]),
+              (0..<24).contains(hour), (0..<60).contains(minute) else {
+            return nil
+        }
+        return hour * 60 + minute
+    }
+
+    /// Normalizes a user-entered time ("7:5", "07:05") to "HH:mm", or nil if invalid.
+    static func normalizedTime(_ time: String) -> String? {
+        guard let minutes = minutes(from: time) else { return nil }
+        return String(format: "%02d:%02d", minutes / 60, minutes % 60)
+    }
+
+    var isValid: Bool {
+        Self.minutes(from: start) != nil && Self.minutes(from: end) != nil
+    }
+
+    /// Whether `date` falls inside this window (ignores `enabled`).
+    func contains(_ date: Date, calendar: Calendar = .current) -> Bool {
+        guard let startMinutes = Self.minutes(from: start), let endMinutes = Self.minutes(from: end) else {
+            return false
+        }
+        let components = calendar.dateComponents([.hour, .minute], from: date)
+        let now = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+
+        if startMinutes == endMinutes {
+            return true
+        }
+        if startMinutes < endMinutes {
+            return now >= startMinutes && now < endMinutes
+        }
+        return now >= startMinutes || now < endMinutes
+    }
+
+    /// Whether the window is enabled, well-formed, and covers `date`.
+    func isActive(at date: Date, calendar: Calendar = .current) -> Bool {
+        enabled && isValid && contains(date, calendar: calendar)
+    }
+
+    var displayRange: String {
+        "\(start)–\(end)"
+    }
+}
+
+/// Why Mac Runner paused a runner on its own.
+enum AutoPauseReason: String, Codable, Sendable, Equatable {
+    case lowBattery
+    case quietHours
+
+    var displayName: String {
+        switch self {
+        case .lowBattery: return "low battery"
+        case .quietHours: return "quiet hours"
+        }
+    }
+}
+
+/// Battery state relevant to auto-pause. nil power state means no battery (desktop Mac).
+struct PowerState: Sendable, Equatable {
+    var isOnBattery: Bool
+    /// Charge percentage 0-100.
+    var batteryLevel: Int
+}
+
+enum AutoPausePolicy {
+    /// Why `runner` should be paused right now, or nil if it may run.
+    static func reason(
+        for runner: Runner,
+        settings: AppSettings,
+        power: PowerState?,
+        now: Date,
+        calendar: Calendar = .current
+    ) -> AutoPauseReason? {
+        if isBatteryLow(settings: settings, power: power) {
+            return .lowBattery
+        }
+        if runner.effectiveQuietHours(global: settings.quietHours)?.isActive(at: now, calendar: calendar) == true {
+            return .quietHours
+        }
+        return nil
+    }
+
+    static func isBatteryLow(settings: AppSettings, power: PowerState?) -> Bool {
+        guard settings.pauseOnBattery, let power, power.isOnBattery else { return false }
+        return power.batteryLevel < settings.batteryPauseThreshold
+    }
 }

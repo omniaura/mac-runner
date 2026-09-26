@@ -24,6 +24,20 @@ struct MenuBarView: View {
             .padding()
             .background(Color.gray.opacity(0.1))
 
+            if let summary = runnerManager.autoPauseSummary() {
+                HStack(spacing: 6) {
+                    Image(systemName: runnerManager.powerState?.isOnBattery == true && summary.isActive ? "battery.25" : "moon.zzz")
+                    Text(summary.text)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                .font(.caption)
+                .foregroundColor(summary.isActive ? .orange : .secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(summary.isActive ? Color.orange.opacity(0.12) : Color.clear)
+            }
+
             // Runner List
             if runnerManager.runners.isEmpty {
                 emptyState
@@ -267,6 +281,7 @@ struct MenuBarView: View {
 struct RunnerRow: View {
     let runner: Runner
     @EnvironmentObject var runnerManager: RunnerManager
+    @State private var showSchedule = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -368,6 +383,18 @@ struct RunnerRow: View {
                             .cornerRadius(4)
                     }
 
+                    if let quietHours = runner.quietHours {
+                        Text(quietHours.enabled ? "🌙 \(quietHours.displayRange)" : "🌙 Never pauses")
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.indigo.opacity(0.2))
+                            .cornerRadius(4)
+                            .help("This runner's own quiet hours")
+                    }
+
                     ForEach(runner.labels, id: \.self) { label in
                         Text(label)
                             .font(.caption2)
@@ -378,6 +405,13 @@ struct RunnerRow: View {
                             .background(Color.blue.opacity(0.2))
                             .cornerRadius(4)
                     }
+                }
+
+                if let autoPauseStatus = runnerManager.autoPauseStatus(for: runner) {
+                    Text(autoPauseStatus)
+                        .font(.caption2)
+                        .foregroundColor(.orange)
+                        .lineLimit(2)
                 }
 
                 if let restartEvent = runner.lastRestartEvent {
@@ -429,6 +463,9 @@ struct RunnerRow: View {
                 }
             }
             Divider()
+            Button("Schedule…") {
+                showSchedule = true
+            }
             Button("Duplicate") {
                 Task { try? await runnerManager.duplicateRunner(runner.id) }
             }
@@ -436,6 +473,10 @@ struct RunnerRow: View {
             Button("Remove", role: .destructive) {
                 Task { try? await runnerManager.removeRunner(runner.id) }
             }
+        }
+        .sheet(isPresented: $showSchedule) {
+            RunnerScheduleView(runner: runner)
+                .environmentObject(runnerManager)
         }
     }
 
@@ -508,6 +549,10 @@ struct SettingsView: View {
                     HStack {
                         Text("Max retries in 10 minutes")
                         Spacer()
+                        // A hidden label would hide the value, so show it alongside.
+                        Text("\(runnerManager.currentSettings.autoRestartMaxRetries)")
+                            .monospacedDigit()
+                            .foregroundColor(.secondary)
                         Stepper(
                             value: Binding(
                                 get: { runnerManager.currentSettings.autoRestartMaxRetries },
@@ -519,8 +564,7 @@ struct SettingsView: View {
                             ),
                             in: 1...20
                         ) {
-                            Text("\(runnerManager.currentSettings.autoRestartMaxRetries)")
-                                .monospacedDigit()
+                            EmptyView()
                         }
                         .labelsHidden()
                     }
@@ -541,6 +585,10 @@ struct SettingsView: View {
                     HStack {
                         Text("Minimum free disk space")
                         Spacer()
+                        // A hidden label would hide the value, so show it alongside.
+                        Text("\(runnerManager.currentSettings.minimumFreeDiskSpaceGB) GB")
+                            .monospacedDigit()
+                            .foregroundColor(.secondary)
                         Stepper(
                             value: Binding(
                                 get: { runnerManager.currentSettings.minimumFreeDiskSpaceGB },
@@ -553,8 +601,7 @@ struct SettingsView: View {
                             in: 10...500,
                             step: 10
                         ) {
-                            Text("\(runnerManager.currentSettings.minimumFreeDiskSpaceGB) GB")
-                                .monospacedDigit()
+                            EmptyView()
                         }
                         .labelsHidden()
                     }
@@ -562,6 +609,8 @@ struct SettingsView: View {
                     Text("At most once per hour, removes stopped-runner workspaces and known CI caches. Active runner data is always preserved.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+
+                    AutoPauseSettingsSection()
 
                     Toggle("Job Notifications", isOn: Binding(
                         get: { runnerManager.currentSettings.notificationsEnabled },
