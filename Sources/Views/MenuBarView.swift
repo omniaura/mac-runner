@@ -463,6 +463,9 @@ struct RunnerRow: View {
                 }
             }
             Divider()
+            Button("View Logs") {
+                NotificationCenter.default.post(name: .openRunnerLogs, object: runner.id)
+            }
             Button("Schedule…") {
                 showSchedule = true
             }

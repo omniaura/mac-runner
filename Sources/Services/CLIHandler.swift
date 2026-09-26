@@ -101,6 +101,8 @@ enum CLIHandler {
             await handleUninstall(args: Array(args.dropFirst()))
         case "cleanup":
             await handleCleanup(args: Array(args.dropFirst()))
+        case "logs":
+            await handleLogs(args: Array(args.dropFirst()))
         case "schedule":
             await handleSchedule(args: Array(args.dropFirst()))
         case "battery":
@@ -133,6 +135,7 @@ enum CLIHandler {
           status            Show runner status summary
           setup             Set up dedicated user isolation
           cleanup           Remove idle runner workspaces and CI caches
+          logs <name>       Show a runner's logs (--follow to stream, --diag for diagnostics)
           schedule          Show or set quiet hours (daily pause window)
           battery           Show or set pausing on low battery
           uninstall         Remove all runners and every file Mac Runner created
@@ -149,6 +152,11 @@ enum CLIHandler {
 
         SETUP OPTIONS:
           --teardown        Remove isolation (delete user, sudoers, reset config)
+
+        LOGS OPTIONS:
+          -n, --lines <N>             Show the last N lines (default 50)
+          -f, --follow                Keep printing new lines (Ctrl-C to stop)
+          --diag                      Show the newest _diag log instead of runner output
 
         SCHEDULE OPTIONS:
           --start HH:mm --end HH:mm   Pause runners daily in this window (may cross midnight)
@@ -183,6 +191,7 @@ enum CLIHandler {
           sudo mac-runner setup
           sudo mac-runner setup --teardown
           mac-runner cleanup --dry-run
+          mac-runner logs my-runner --follow
           mac-runner schedule --start 22:00 --end 06:00
           mac-runner battery on --threshold 25
         """)
@@ -478,6 +487,53 @@ enum CLIHandler {
             }
         }
         return lines
+    }
+
+    @MainActor
+    private static func handleLogs(args: [String]) async {
+        let command: LogsCommand
+        switch LogsCommand.parse(args) {
+        case .success(let parsed): command = parsed
+        case .failure(let error):
+            print("Error: \(error.text)")
+            print(LogsCommand.usage)
+            return
+        }
+
+        let manager = RunnerManager()
+        guard let runner = manager.runner(named: command.runnerName) else {
+            print("Error: runner '\(command.runnerName)' not found")
+            return
+        }
+
+        guard var path = manager.logPath(for: runner, source: command.source),
+              FileManager.default.fileExists(atPath: path) else {
+            print(command.source == .diagnostics
+                ? "No diagnostics logs yet for '\(runner.name)'."
+                : "No logs yet for '\(runner.name)'.")
+            return
+        }
+
+        for line in RunnerLogs.lastLines(of: path, count: command.lines) {
+            print(line)
+        }
+        guard command.follow else { return }
+
+        setvbuf(stdout, nil, _IOLBF, 0)
+        var follower = LogFollower(path: path, startAtEnd: true)
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(500))
+            // Diagnostics roll over to a new file when the runner restarts.
+            if command.source == .diagnostics,
+               let latest = manager.logPath(for: runner, source: .diagnostics), latest != path {
+                path = latest
+                print("==> \((path as NSString).lastPathComponent) <==")
+                follower = LogFollower(path: path, startAtEnd: false)
+            }
+            for line in follower.readNewLines() {
+                print(line)
+            }
+        }
     }
 
     @MainActor

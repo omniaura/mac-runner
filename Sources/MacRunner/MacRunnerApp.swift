@@ -22,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var popover: NSPopover!
     let runnerManager = RunnerManager()
     private var settingsWindow: NSWindow?
+    private var logWindows: [UUID: NSWindow] = [:]
     private var iconAnimator: StatusItemIconAnimator?
     private var cancellables: Set<AnyCancellable> = []
 
@@ -49,6 +50,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(handleOpenSettings),
             name: .openSettings,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOpenRunnerLogs(_:)),
+            name: .openRunnerLogs,
             object: nil
         )
 
@@ -133,8 +140,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: window,
             queue: .main
         ) { [weak self] _ in
-            self?.settingsWindow = nil
-            NSApp.setActivationPolicy(.accessory)
+            MainActor.assumeIsolated {
+                self?.settingsWindow = nil
+                self?.restoreAccessoryPolicyIfNoWindows()
+            }
         }
+    }
+
+    @objc func handleOpenRunnerLogs(_ notification: Notification) {
+        guard let id = notification.object as? UUID,
+              let runner = runnerManager.runners.first(where: { $0.id == id }) else { return }
+        popover.performClose(nil)
+        NSApp.setActivationPolicy(.regular)
+
+        if let window = logWindows[id] {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let manager = runnerManager
+        let model = LogViewerModel(runner: runner) { [weak manager] source in
+            guard let manager, let current = manager.runners.first(where: { $0.id == id }) else { return nil }
+            return manager.logPath(for: current, source: source)
+        }
+        let window = NSWindow(contentViewController: NSHostingController(rootView: LogViewerView(model: model)))
+        window.title = "\(runner.name) — Logs"
+        window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
+        window.setContentSize(NSSize(width: 860, height: 520))
+        window.setFrameAutosaveName("RunnerLogs")
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        logWindows[id] = window
+
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.logWindows.removeValue(forKey: id)
+                self?.restoreAccessoryPolicyIfNoWindows()
+            }
+        }
+    }
+
+    /// Hide the dock icon again once no Mac Runner windows remain open.
+    private func restoreAccessoryPolicyIfNoWindows() {
+        guard settingsWindow == nil, logWindows.isEmpty else { return }
+        NSApp.setActivationPolicy(.accessory)
     }
 }

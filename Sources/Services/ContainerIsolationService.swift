@@ -139,6 +139,12 @@ class ContainerIsolationService {
             ]
             containerConfig.process.workingDirectory = "/runner"
 
+            if let logFileURL = config.logFileURL,
+               let writer = try? FileLogWriter(path: logFileURL.path) {
+                containerConfig.process.stdout = writer
+                containerConfig.process.stderr = writer
+            }
+
             // Set environment variables
             containerConfig.process.environmentVariables.append("RUNNER_ALLOW_RUNASROOT=1")
 
@@ -285,6 +291,39 @@ enum ContainerIsolationError: Error, LocalizedError {
     }
 }
 
+// MARK: - Logging
+
+/// Appends data to a log file. Shared by a process's stdout and stderr, so
+/// writes are serialized and `close()` is idempotent.
+final class FileLogWriter: @unchecked Sendable {
+    private let handle: FileHandle
+    private let lock = NSLock()
+    private var isClosed = false
+
+    init(path: String) throws {
+        handle = try RunnerLogs.openForAppending(path)
+    }
+
+    func write(_ data: Data) throws {
+        try lock.withLock {
+            guard !isClosed else { return }
+            try handle.write(contentsOf: data)
+        }
+    }
+
+    func close() throws {
+        try lock.withLock {
+            guard !isClosed else { return }
+            isClosed = true
+            try handle.close()
+        }
+    }
+}
+
+#if canImport(Containerization)
+extension FileLogWriter: Writer {}
+#endif
+
 // MARK: - Configuration
 
 /// Configuration for a containerized runner.
@@ -315,6 +354,10 @@ struct ContainerRunnerConfiguration {
 
     /// Maximum open file limit to set before starting the runner.
     var openFileLimit: Int = ResourceLimits.defaultOpenFileLimit
+
+    /// Host file that receives the container process's stdout and stderr
+    /// (the runner's `runner.log`), so logs work the same as other modes.
+    var logFileURL: URL?
 
     /// Default container image for GitHub Actions runners.
     static let defaultRunnerImage = "ghcr.io/actions/runner:latest"

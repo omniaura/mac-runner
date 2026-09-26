@@ -32,12 +32,12 @@ class ProcessManager {
 
         switch isolation {
         case .none, .container:
-            // Create log file and open handle
-            FileManager.default.createFile(atPath: logFile, contents: nil)
-            guard let logHandle = FileHandle(forWritingAtPath: logFile) else {
+            // Append to the existing log (earlier runs and Mac Runner's own
+            // events stay visible), rotating it first if it has grown too big.
+            RunnerLogs.rotateIfNeeded(logFile)
+            guard let logHandle = try? RunnerLogs.openForAppending(logFile) else {
                 throw RunnerError.startFailed
             }
-            logHandle.seekToEndOfFile()
 
             // Launch process via bash to set resource limits
             let proc = Process()
@@ -68,6 +68,8 @@ class ProcessManager {
                 owner: username
             )
 
+            RunnerLogs.rotateIfNeeded(logFile, serviceUser: username)
+
             // The workspace is owned by the service user, so it creates the log and
             // grants only the host user (via ACL) write access, so we can open it
             // for the runner's output and append our own events.
@@ -81,11 +83,9 @@ class ProcessManager {
                 errorMessage: "Failed to create runner log"
             )
 
-            // Open log file for writing
-            guard let logHandle = FileHandle(forWritingAtPath: logFile) else {
+            guard let logHandle = try? RunnerLogs.openForAppending(logFile) else {
                 throw RunnerError.startFailed
             }
-            logHandle.seekToEndOfFile()
 
             // Launch process as dedicated user with logging enabled
             let proc: Process
