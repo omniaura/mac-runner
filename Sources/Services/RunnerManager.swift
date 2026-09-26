@@ -32,6 +32,8 @@ class RunnerManager: ObservableObject {
     @Published private(set) var gitHubAuthIssue: String?
     /// Internal battery state; nil on Macs without a battery.
     @Published private(set) var powerState: PowerState?
+    /// Jobs seen on each runner since the app launched, newest first.
+    @Published private(set) var recentJobs: [UUID: [RecentJob]] = [:]
     /// Latest CPU/memory/disk sample per running runner.
     @Published private(set) var resourceUsage: [UUID: RunnerResourceUsage] = [:]
     /// Busy runners that will pause as soon as their current job finishes.
@@ -1795,6 +1797,7 @@ class RunnerManager: ObservableObject {
         }
 
         activeWorkflowJobs[runner.id] = job
+        recordJob(job, for: runner.id)
         if currentSettings.notificationsEnabled {
             await jobNotificationService.notify(event: .started, runner: runner, job: job)
         }
@@ -1815,6 +1818,8 @@ class RunnerManager: ObservableObject {
             completedJob = nil
         }
 
+        recordJob(completedJob ?? activeJob, for: runner.id, finishedAt: Date())
+
         if currentSettings.notificationsEnabled {
             await jobNotificationService.notify(
                 event: .completed,
@@ -1822,6 +1827,35 @@ class RunnerManager: ObservableObject {
                 job: completedJob ?? activeJob
             )
         }
+    }
+
+    nonisolated static let recentJobLimit = 20
+
+    private func recordJob(_ job: WorkflowJobSummary, for runnerID: UUID, finishedAt: Date? = nil) {
+        recentJobs[runnerID] = Self.updatedJobHistory(
+            recentJobs[runnerID] ?? [],
+            with: job,
+            finishedAt: finishedAt,
+            now: Date()
+        )
+    }
+
+    /// Insert or update `job` (matched by id) at the front of `history`, capped at `recentJobLimit`.
+    nonisolated static func updatedJobHistory(
+        _ history: [RecentJob],
+        with job: WorkflowJobSummary,
+        finishedAt: Date?,
+        now: Date
+    ) -> [RecentJob] {
+        var history = history
+        var entry = RecentJob(job: job, startedAt: now, finishedAt: finishedAt)
+        if let index = history.firstIndex(where: { $0.job.id == job.id }) {
+            entry.startedAt = history[index].startedAt
+            entry.finishedAt = finishedAt ?? history[index].finishedAt
+            history.remove(at: index)
+        }
+        history.insert(entry, at: 0)
+        return Array(history.prefix(recentJobLimit))
     }
 
     private func cancelScheduledRestarts(clearHistory: Bool) {

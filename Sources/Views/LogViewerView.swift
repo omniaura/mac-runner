@@ -21,7 +21,7 @@ final class LogViewerModel: ObservableObject {
     @Published private(set) var path: String?
 
     private let runner: Runner
-    private let resolvePath: (RunnerLogs.Source) -> String?
+    var resolvePath: (RunnerLogs.Source) -> String?
     private var follower: LogFollower?
     private var timer: Timer?
 
