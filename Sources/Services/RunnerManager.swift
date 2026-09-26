@@ -1614,6 +1614,7 @@ class RunnerManager: ObservableObject {
                             await handleJobStarted(for: runners[index])
                         } else {
                             await handleJobCompleted(for: runners[index])
+                            finishLogOnlyJob(runner.id, conclusion: nil)
                             becameIdleRunnerIDs.insert(runner.id)
                         }
                     }
@@ -2039,12 +2040,18 @@ class RunnerManager: ObservableObject {
         activeWorkflowJobs[runner.id] = try? await ghService.currentJob(for: runner.repo, runnerName: runner.name)
     }
 
-    private func handleJobStarted(for runner: Runner, notify: Bool = true) async {
+    private func handleJobStarted(for runner: Runner, notify: Bool = true, expectedName: String? = nil) async {
         guard activeWorkflowJobs[runner.id] == nil else { return }
         guard runner.scope == .repo else { return }
-        guard let job = try? await ghService.currentJob(for: runner.repo, runnerName: runner.name) else {
+        let ghService = ghService
+        let repo = runner.repo, runnerName = runner.name
+        guard let job = await Self.withTimeout(seconds: 8, {
+            try? await ghService.currentJob(for: repo, runnerName: runnerName)
+        }) ?? nil else {
             return
         }
+        // The lookup matches by runner only; make sure it's the job the log reported.
+        if let expectedName, job.name != expectedName { return }
 
         activeWorkflowJobs[runner.id] = job
         recordJob(job, for: runner.id)
@@ -2060,8 +2067,12 @@ class RunnerManager: ObservableObject {
         // Look up this exact job; its run may still be going (other jobs) and
         // GitHub can take a moment to record the result.
         var completedJob: WorkflowJobSummary?
+        let ghService = ghService
+        let repo = runner.repo
         if runner.scope == .repo,
-           let job = try? await ghService.job(for: runner.repo, id: activeJob.id, run: activeJob.run),
+           let job = await Self.withTimeout(seconds: 8, {
+               try? await ghService.job(for: repo, id: activeJob.id, run: activeJob.run)
+           }) ?? nil,
            job.status == "completed" {
             completedJob = job
         }
@@ -2091,40 +2102,68 @@ class RunnerManager: ObservableObject {
 
     /// Read new job activity from each running runner's log.
     func scanJobLogs() async {
-        let running = runners.filter { $0.status == .running }
-        let runningIDs = Set(running.map(\.id))
-        jobLogTrackers = jobLogTrackers.filter { runningIDs.contains($0.key) }
-        logOnlyActiveJobs = logOnlyActiveJobs.filter { runningIDs.contains($0.key) }
+        let runningIDs = Set(runners.filter { $0.status == .running }.map(\.id))
 
-        for runner in running {
+        // Runners that stopped or were removed: read what's left, then close any open job.
+        for id in Array(jobLogTrackers.keys) where !runningIDs.contains(id) {
+            await stopTrackingJobLog(id, runnerStopped: true)
+        }
+
+        for id in runningIDs {
+            guard let runner = runners.first(where: { $0.id == id }) else { continue }
             guard let path = logPath(for: runner, source: .output),
-                  FileManager.default.fileExists(atPath: path) else { continue }
+                  FileManager.default.fileExists(atPath: path) else {
+                // No log to follow: fall back to GitHub's busy flag.
+                await stopTrackingJobLog(id, runnerStopped: false)
+                continue
+            }
 
-            guard let tracker = jobLogTrackers[runner.id] else {
-                // Start following; adopt the log's view of whether a job is running.
+            guard let tracker = jobLogTrackers[id] else {
+                // Start following; adopt the log's view of any job in progress.
                 let tracker = JobLogTracker(path: path)
-                jobLogTrackers[runner.id] = tracker
-                if let index = runners.firstIndex(where: { $0.id == runner.id }),
-                   runners[index].busy != (tracker.currentJob != nil) {
+                jobLogTrackers[id] = tracker
+                if let index = runners.firstIndex(where: { $0.id == id }) {
                     runners[index].busy = tracker.currentJob != nil
+                }
+                if let job = tracker.currentJob {
+                    await logJobStarted(job, runnerID: id, notify: false)
                 }
                 continue
             }
 
-            let changes = tracker.poll()
-            for (offset, change) in changes.enumerated() {
-                switch change {
-                case .started(let name):
-                    // Started and finished within one scan: report it once, as finished.
-                    let finishedAlready = changes.dropFirst(offset + 1).contains {
-                        if case .completed(let completed, _) = $0 { return completed == name }
-                        return false
-                    }
-                    await logJobStarted(name, runnerID: runner.id, notify: !finishedAlready)
-                case .completed(let name, let conclusion):
-                    await logJobCompleted(name, conclusion: conclusion, runnerID: runner.id)
+            await applyJobLogChanges(tracker.poll(), runnerID: id)
+        }
+    }
+
+    private func applyJobLogChanges(_ changes: [JobLogTracker.Change], runnerID: UUID) async {
+        for (offset, change) in changes.enumerated() {
+            switch change {
+            case .started(let name):
+                // Started and finished within one scan: report it once, as finished.
+                let finishedAlready = changes.dropFirst(offset + 1).contains {
+                    if case .completed(let completed, _) = $0 { return completed == name }
+                    return false
                 }
+                await logJobStarted(name, runnerID: runnerID, notify: !finishedAlready)
+            case .completed(let name, let conclusion):
+                await logJobCompleted(name, conclusion: conclusion, runnerID: runnerID)
             }
+        }
+    }
+
+    private func stopTrackingJobLog(_ id: UUID, runnerStopped: Bool) async {
+        guard let tracker = jobLogTrackers.removeValue(forKey: id) else { return }
+        await applyJobLogChanges(tracker.poll(), runnerID: id)
+        guard runners.contains(where: { $0.id == id }) else {
+            logOnlyActiveJobs.removeValue(forKey: id)
+            return
+        }
+        if runnerStopped, let job = tracker.currentJob {
+            // The runner stopped mid-job.
+            await logJobCompleted(job, conclusion: "cancelled", runnerID: id)
+        } else if !runnerStopped {
+            // Its log went away; GitHub polling takes over. Close what the log opened.
+            finishLogOnlyJob(id, conclusion: nil)
         }
     }
 
@@ -2132,8 +2171,8 @@ class RunnerManager: ObservableObject {
         guard let index = runners.firstIndex(where: { $0.id == runnerID }) else { return }
         runners[index].busy = true
 
-        // Prefer GitHub's record (run name and link) when it can be found.
-        await handleJobStarted(for: runners[index], notify: notify)
+        // Prefer GitHub's record (run name and link), but only for this job.
+        await handleJobStarted(for: runners[index], notify: notify, expectedName: name)
         guard activeWorkflowJobs[runnerID] == nil,
               let runner = runners.first(where: { $0.id == runnerID }) else { return }
 
@@ -2150,17 +2189,75 @@ class RunnerManager: ObservableObject {
         runners[index].busy = false
         let runner = runners[index]
 
-        if activeWorkflowJobs[runnerID] != nil {
+        if let active = activeWorkflowJobs[runnerID], active.name == name {
             await handleJobCompleted(for: runner, logConclusion: conclusion)
         } else {
+            activeWorkflowJobs.removeValue(forKey: runnerID)  // stale: not this job
             let job = (logOnlyActiveJobs.removeValue(forKey: runnerID) ?? logOnlyJob(named: name, for: runner))
                 .completed(conclusion: conclusion)
             recordJob(job, for: runnerID, finishedAt: Date())
+            if runner.scope == .repo {
+                linkLogOnlyJobLater(job, repo: runner.repo, runnerName: runner.name, runnerID: runnerID)
+            }
             if currentSettings.notificationsEnabled {
                 await jobNotificationService.notify(event: .completed, runner: runner, job: job)
             }
         }
         await restartRunnersWithStalePathSnapshots(candidateIDs: [runnerID])
+    }
+
+    /// Close a job the log opened when its result can't be known.
+    private func finishLogOnlyJob(_ runnerID: UUID, conclusion: String?) {
+        guard let job = logOnlyActiveJobs.removeValue(forKey: runnerID) else { return }
+        recordJob(conclusion.map { job.completed(conclusion: $0) } ?? job, for: runnerID, finishedAt: Date())
+    }
+
+    /// Swap a log-only history entry for GitHub's record once it can be found,
+    /// so Recent Jobs links to the actual run.
+    private func linkLogOnlyJobLater(_ job: WorkflowJobSummary, repo: String, runnerName: String, runnerID: UUID) {
+        let ghService = ghService
+        Task { [weak self] in
+            for delay in [5, 30, 120] {
+                try? await Task.sleep(for: .seconds(delay))
+                guard let found = await Self.withTimeout(seconds: 20, {
+                    try? await ghService.findJob(for: repo, runnerName: runnerName, named: job.name)
+                }) ?? nil else { continue }
+                guard let self, let history = self.recentJobs[runnerID] else { return }
+                self.recentJobs[runnerID] = Self.replacingJob(
+                    in: history,
+                    id: job.id,
+                    with: found.completed(conclusion: job.conclusion ?? found.conclusion ?? "completed")
+                )
+                return
+            }
+        }
+    }
+
+    /// `history` with the entry for job `id` replaced (keeping its times).
+    nonisolated static func replacingJob(in history: [RecentJob], id: Int, with job: WorkflowJobSummary) -> [RecentJob] {
+        history.map { entry in
+            guard entry.job.id == id else { return entry }
+            var updated = entry
+            updated.job = job
+            return updated
+        }
+    }
+
+    /// Run `operation`, giving up (nil) after `seconds`. The operation keeps
+    /// running in the background; only the caller stops waiting.
+    nonisolated static func withTimeout<T: Sendable>(
+        seconds: Double,
+        _ operation: @escaping @Sendable () async -> T?
+    ) async -> T? {
+        let once = ResumeOnce<T?>()
+        return await withCheckedContinuation { continuation in
+            once.set(continuation)
+            Task { once.resume(await operation()) }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                once.resume(nil)
+            }
+        }
     }
 
     /// A job known only from the runner's log; links to the Actions page.
@@ -2354,6 +2451,39 @@ enum RunnerError: LocalizedError {
             return "Bulk creation: \(succeeded) succeeded, \(failed) failed (\(details))"
         case .containerHostedElsewhere(let pid):
             return "This container runner's VM runs inside another Mac Runner process (pid \(pid)). Stop it there: Ctrl-C in that terminal, or the menu bar app."
+        }
+    }
+}
+
+/// Resumes a continuation exactly once, from whichever caller gets there first.
+private final class ResumeOnce<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Never>?
+    private var pending: T?
+    private var finished = false
+
+    func set(_ continuation: CheckedContinuation<T, Never>) {
+        lock.lock()
+        if finished, let value = pending {
+            lock.unlock()
+            continuation.resume(returning: value)
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func resume(_ value: T) {
+        lock.lock()
+        guard !finished else { lock.unlock(); return }
+        finished = true
+        if let continuation {
+            self.continuation = nil
+            lock.unlock()
+            continuation.resume(returning: value)
+        } else {
+            pending = value
+            lock.unlock()
         }
     }
 }

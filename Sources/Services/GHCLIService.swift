@@ -299,6 +299,20 @@ final class GHCLIService: Sendable {
         return nil
     }
 
+    /// The most recent job named `name` that ran on `runnerName`, in running or
+    /// recently completed workflow runs.
+    func findJob(for repo: String, runnerName: String, named name: String) async throws -> WorkflowJobSummary? {
+        for status in ["in_progress", "completed"] {
+            for run in try await listWorkflowRuns(for: repo, status: status) {
+                let jobs = try await listJobs(for: repo, runID: run.id, run: run)
+                if let job = jobs.first(where: { $0.runnerName == runnerName && $0.name == name }) {
+                    return job
+                }
+            }
+        }
+        return nil
+    }
+
     /// A specific job by id, whatever state its workflow run is in.
     func job(for repo: String, id: Int, run: WorkflowRunSummary) async throws -> WorkflowJobSummary? {
         let result = try await runGH(["api", "repos/\(repo)/actions/jobs/\(id)"])

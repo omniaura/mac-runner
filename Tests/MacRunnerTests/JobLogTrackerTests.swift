@@ -83,4 +83,40 @@ final class JobLogTrackerTests: XCTestCase {
         )
         XCTAssertEqual(RecentJob(job: done, startedAt: Date(), finishedAt: Date()).displayName, "build")
     }
+
+    func testTimeoutReturnsFastResultsAndGivesUpOnSlowOnes() async {
+        let fast = await RunnerManager.withTimeout(seconds: 5) { "done" }
+        XCTAssertEqual(fast, "done")
+
+        let start = Date()
+        let slow: String? = await RunnerManager.withTimeout(seconds: 0.3) {
+            try? await Task.sleep(for: .seconds(10))
+            return "late"
+        }
+        XCTAssertNil(slow)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 3)
+
+        // An operation that finishes before the continuation is even registered.
+        for _ in 0..<50 {
+            let immediate = await RunnerManager.withTimeout(seconds: 5) { 1 }
+            XCTAssertEqual(immediate, 1)
+        }
+    }
+
+    func testReplacingALogOnlyEntryKeepsItsTimes() {
+        let run = WorkflowRunSummary(id: 0, name: "", htmlURL: URL(string: "https://github.com/o/r/actions")!)
+        let logOnly = WorkflowJobSummary(id: -3, name: "build", status: "completed", conclusion: "success", runnerName: "r", run: run)
+        let other = WorkflowJobSummary(id: 7, name: "lint", status: "completed", conclusion: "success", runnerName: "r", run: run)
+        let started = Date(timeIntervalSince1970: 10), finished = Date(timeIntervalSince1970: 20)
+        let history = [RecentJob(job: logOnly, startedAt: started, finishedAt: finished), RecentJob(job: other, startedAt: started, finishedAt: nil)]
+
+        let realRun = WorkflowRunSummary(id: 55, name: "CI", htmlURL: URL(string: "https://github.com/o/r/actions/runs/55")!)
+        let real = WorkflowJobSummary(id: 99, name: "build", status: "completed", conclusion: "success", runnerName: "r", run: realRun)
+        let updated = RunnerManager.replacingJob(in: history, id: -3, with: real)
+
+        XCTAssertEqual(updated[0].job, real)
+        XCTAssertEqual(updated[0].startedAt, started)
+        XCTAssertEqual(updated[0].finishedAt, finished)
+        XCTAssertEqual(updated[1], history[1])
+    }
 }
