@@ -13,8 +13,15 @@ Simple Mac menu bar app and CLI for managing GitHub Actions self-hosted runners.
 - 🎯 Perfect for when you need your Mac's resources for intensive work
 - 📊 Monitor runner status from menu bar
 - ⚡ Native Mac app, lightweight and fast
-- 🤖 **Fully automated setup** — downloads and configures runners automatically
-- 🧹 **Disk pressure cleanup** — safely reclaim idle runner workspaces and CI caches
+- 🤖 **Fully automated setup**: downloads and configures runners automatically, and provisions `gh` plus the repo's toolchains (Node, Python, Go, Ruby, Rust) on the host or in containers
+- 🧹 **Disk pressure cleanup**: safely reclaim idle runner workspaces and CI caches
+- 🔋 **Auto-pause**: pause runners on low battery or during quiet hours (per-runner schedules), finishing the current job first and resuming automatically
+- 📈 **Resource monitoring**: per-runner CPU, memory, and workspace size, with optional alerts (`mac-runner status --resources`)
+- 📜 **Log viewer**: live-tail, filter, and export runner output and diagnostics (`mac-runner logs <name> --follow`), with log rotation
+- 🪟 **Dashboard window**: every runner's status, current job, recent jobs, resources, and logs in one window
+- 🔔 **Job notifications**: native notifications when jobs start and finish, and an animated menu bar icon while they run
+- 📦 **Custom container images**: run Linux runners on any OCI image, each with its own virtual display when GUI access is on
+- 🗂️ **Declarative config**: describe runners in `.mac-runner.yml` and `mac-runner apply` them (`mac-runner export` to start)
 
 ## Why?
 
@@ -342,14 +349,9 @@ Add Runner → Enable GUI Access (toggle)
 - **Container runners** with GUI access each get their **own virtual display**: Xvfb runs inside the runner's VM (1920×1080×24) and `DISPLAY` is set for its jobs, so windows, focus, and screenshots from one runner never touch another's. Linux GUI tests (headed browsers, Electron, X11 apps) run side by side without interfering. Headless container runners get `CI=true HEADLESS=true` like other modes.
 - **macOS runners** (no isolation or a dedicated user) with GUI access share the logged-in user's desktop. macOS only gives a user a separate GUI session when that user actually logs in at the login window, and the dedicated `_macrunner` user has no password by design, so Mac Runner can't create one. For parallel macOS UI tests, either keep one GUI-enabled runner per Mac (target it with a label) or run Mac Runner inside separate macOS VMs, each with its own GUI-enabled runner.
 
-## Planned Features
+## Roadmap
 
-- [ ] Auto-provision CI tools (node, npm, gh) in runner environments
-- [ ] Automatic pause when battery low
-- [ ] Pause during specific hours
-- [ ] Resource usage monitoring
-- [ ] Notifications for job starts
-- [ ] Custom container images for containerized runners
+Planned work and ideas are tracked in the [issue tracker](https://github.com/omniaura/mac-runner/issues?q=is%3Aopen+label%3Aenhancement), ordered by the `priority:high`, `priority:medium`, and `priority:low` labels. Open issues with a linked pull request are in progress. Suggestions are welcome: [open an issue](https://github.com/omniaura/mac-runner/issues/new).
 
 ## Architecture
 
