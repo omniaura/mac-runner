@@ -15,6 +15,11 @@ struct WorkflowJobSummary: Sendable, Equatable {
     let conclusion: String?
     let runnerName: String?
     let run: WorkflowRunSummary
+
+    /// This job, finished with `conclusion`.
+    func completed(conclusion: String) -> WorkflowJobSummary {
+        WorkflowJobSummary(id: id, name: name, status: "completed", conclusion: conclusion, runnerName: runnerName, run: run)
+    }
 }
 
 /// A job a runner picked up while the app was running.

@@ -18,8 +18,8 @@ Simple Mac menu bar app and CLI for managing GitHub Actions self-hosted runners.
 - 🔋 **Auto-pause**: pause runners on low battery or during quiet hours (per-runner schedules), finishing the current job first and resuming automatically
 - 📈 **Resource monitoring**: per-runner CPU, memory, and workspace size, with optional alerts (`mac-runner status --resources`)
 - 📜 **Log viewer**: live-tail, filter, and export runner output and diagnostics (`mac-runner logs <name> --follow`), with log rotation
-- 🪟 **Dashboard window**: every runner's status, resources, and logs in one window, plus the current job and recent jobs for repository runners
-- 🔔 **Job notifications**: native notifications when a repository runner's jobs start and finish, and an animated menu bar icon while any runner is executing
+- 🪟 **Dashboard window**: every runner's status, current job, recent jobs, resources, and logs in one window
+- 🔔 **Job notifications**: native notifications when jobs start and finish (caught from each runner's own log, so even jobs of a few seconds show up), and an animated menu bar icon while any runner is executing
 - 📦 **Custom container images**: run Linux runners on your own OCI images (linux/arm64 with `bash`; see [Container Isolation](#3-container-isolation-macos-26-apple-silicon) for requirements), each with its own virtual display when GUI access is on
 - 🗂️ **Declarative config**: describe runners in `.mac-runner.yml` and `mac-runner apply` them (`mac-runner export` to start)
 
