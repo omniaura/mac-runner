@@ -71,6 +71,8 @@ class RunnerManager: ObservableObject {
     /// Names reserved by in-flight addRunner calls to prevent duplicate naming race conditions.
     private var pendingRunnerNames: Set<String> = []
     private var manualStopRequests: Set<UUID> = []
+    /// Runners whose startRunner is still running (container starts take a while).
+    private var startingRunnerIDs: Set<UUID> = []
     private var restartAttemptHistory: [UUID: [Date]] = [:]
     private var scheduledRestarts: [UUID: Task<Void, Never>] = [:]
     private var launchTokens: [UUID: UUID] = [:]
@@ -584,16 +586,25 @@ class RunnerManager: ObservableObject {
     func removeRunner(_ id: UUID) async throws {
         // Stop runner if it's running (in-memory or via PID file)
         if let index = runners.firstIndex(where: { $0.id == id }), runners[index].status == .running {
-            try? await stopRunner(id)
+            do {
+                try await stopRunner(id)
+            } catch RunnerError.containerHostedElsewhere(let pid) {
+                // Its VM is still running elsewhere; keep its registration and records.
+                throw RunnerError.containerHostedElsewhere(pid: pid)
+            } catch {
+                // Not running after all; carry on removing it.
+            }
         }
 
         // Remove from GitHub via gh CLI. Container runners register from inside
-        // their container, so their GitHub ID may only be findable by name.
+        // their container; their ID is recorded once they come online. Without
+        // one, only an offline registration with this name is removed, so a live
+        // runner we can't tie to this one is never touched.
         if let runner = runners.first(where: { $0.id == id }) {
             var githubRunnerId = runner.githubRunnerId
             if githubRunnerId == nil,
                let remote = try? await ghService.listRemoteRunners(for: runner.target) {
-                githubRunnerId = remote.first(where: { $0.name == runner.name })?.id
+                githubRunnerId = Self.offlineRegistration(named: runner.name, in: remote)?.id
             }
             if let ghId = githubRunnerId {
                 try? await ghService.deleteRunner(target: runner.target, githubRunnerId: ghId)
@@ -649,6 +660,8 @@ class RunnerManager: ObservableObject {
             throw RunnerError.alreadyRunning
         }
 
+        startingRunnerIDs.insert(id)
+        defer { startingRunnerIDs.remove(id) }
         scheduledRestarts[id]?.cancel()
         scheduledRestarts.removeValue(forKey: id)
         // A stop followed by a start (restart) leaves the stop's marker behind:
@@ -746,6 +759,7 @@ class RunnerManager: ObservableObject {
                 // The VM lives in this process; record it so other Mac Runner
                 // processes see the runner as running rather than stale.
                 try? pidManager.writePID(ProcessInfo.processInfo.processIdentifier, for: id)
+                recordGitHubRunnerIDOnceOnline(id)
 
                 // Monitor container in background
                 Task {
@@ -1473,6 +1487,45 @@ class RunnerManager: ObservableObject {
         }
     }
 
+    // MARK: - Container Runners
+
+    /// Container runners whose VM runs in this process.
+    var hostedContainerRunnerIDs: [UUID] {
+        Array(runnerContainers.keys)
+    }
+
+    /// Whether a crash restart is scheduled or a start is in progress.
+    func hasPendingRestart(_ id: UUID) -> Bool {
+        scheduledRestarts[id] != nil || startingRunnerIDs.contains(id)
+    }
+
+    nonisolated static func offlineRegistration(named name: String, in remote: [RemoteRunner]) -> RemoteRunner? {
+        remote.first { $0.name == name && $0.status == "offline" }
+    }
+
+    /// A container runner registers from inside its VM; remember its GitHub ID
+    /// once it's online so removal can deregister exactly that runner.
+    private func recordGitHubRunnerIDOnceOnline(_ id: UUID) {
+        Task { [weak self] in
+            for _ in 0..<24 {
+                try? await Task.sleep(for: .seconds(5))
+                guard let self,
+                      let runner = self.runners.first(where: { $0.id == id }),
+                      runner.status == .running,
+                      self.runnerContainers[id] != nil else { return }
+                if let remote = try? await self.ghService.listRemoteRunners(for: runner.target),
+                   let match = remote.first(where: { $0.name == runner.name && $0.status == "online" }),
+                   let index = self.runners.firstIndex(where: { $0.id == id }) {
+                    if self.runners[index].githubRunnerId != match.id {
+                        self.runners[index].githubRunnerId = match.id
+                        self.saveConfiguration()
+                    }
+                    return
+                }
+            }
+        }
+    }
+
     // MARK: - Lookup
 
     /// Find a runner by name.
@@ -1906,7 +1959,9 @@ class RunnerManager: ObservableObject {
     }
 
     private func performScheduledRestart(for id: UUID) async {
-        defer { scheduledRestarts.removeValue(forKey: id) }
+        // This runs inside the scheduled task: drop it from the table first, or
+        // startRunner cancels it (and itself) and the restart fails at its next await.
+        scheduledRestarts.removeValue(forKey: id)
 
         guard let runnerIndex = runners.firstIndex(where: { $0.id == id }) else { return }
         guard currentSettings.autoRestartEnabled else { return }

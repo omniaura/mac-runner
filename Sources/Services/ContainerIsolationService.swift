@@ -83,6 +83,11 @@ class ContainerIsolationService {
         // containerization reuses an existing initfs.ext4 whatever vminit built it;
         // rebuild it when our pinned vminit changes, or the guest agent won't match.
         let storeRoot = Self.defaultStoreRoot()
+        // Another Mac Runner process (the app or a CLI) may be initializing the
+        // same store: serialize checking, rebuilding, and recording the initfs.
+        try FileManager.default.createDirectory(at: storeRoot, withIntermediateDirectories: true)
+        let lock = try FileLock(path: storeRoot.appendingPathComponent("mac-runner-initfs.lock").path)
+        defer { lock.unlock() }
         Self.discardStaleInitFilesystem(storeRoot: storeRoot, reference: Self.initfsReference)
 
         // Initialize container manager with kernel and network
@@ -177,10 +182,12 @@ class ContainerIsolationService {
         }
 
         // A crash or failed start can leave this runner's previous container
-        // behind, and create() refuses to reuse the id.
-        if activeContainers[id] == nil {
-            try? manager.delete(id)
+        // behind, and create() refuses to reuse the id. Nothing is running
+        // under it (startRunner checked), so clear it.
+        if let stale = activeContainers.removeValue(forKey: id) {
+            try? await stale.stop()
         }
+        try? manager.delete(id)
 
         // Create container with specified configuration
         let container = try await manager.create(
@@ -317,6 +324,32 @@ enum ContainerIsolationError: Error, LocalizedError {
         case .stopFailed(let message):
             return "Failed to stop container: \(message)"
         }
+    }
+}
+
+// MARK: - Locking
+
+/// An exclusive advisory lock (flock) on a file, shared across processes.
+final class FileLock {
+    private var fd: Int32
+
+    init(path: String) throws {
+        fd = open(path, O_CREAT | O_RDWR, 0o644)
+        guard fd >= 0 else {
+            throw CocoaError(.fileWriteNoPermission, userInfo: [NSFilePathErrorKey: path])
+        }
+        _ = flock(fd, LOCK_EX)
+    }
+
+    func unlock() {
+        guard fd >= 0 else { return }
+        _ = flock(fd, LOCK_UN)
+        close(fd)
+        fd = -1
+    }
+
+    deinit {
+        unlock()
     }
 }
 

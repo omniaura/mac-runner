@@ -14,8 +14,20 @@ enum ContainerRunnerScript {
     log() { echo "[mac-runner] $*"; }
     # GitHub's runner image copies its diagnostics to stdout; they're in _diag already.
     unset ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT
-    SUDO=""
-    if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
+    if [ -n "${MR_SUDO+set}" ]; then SUDO="$MR_SUDO"
+    elif [ "$(id -u)" -ne 0 ]; then SUDO="sudo"
+    else SUDO=""; fi
+    # Make a directory owned by this user, using sudo only if needed.
+    ensure_dir() {
+      mkdir -p "$1" 2>/dev/null || $SUDO mkdir -p "$1"
+      [ -w "$1" ] || $SUDO chown "$(id -u):$(id -g)" "$1"
+    }
+    # Don't register a runner that's missing tools its jobs were promised.
+    fail_tools() {
+      log "ERROR: tool installation failed ($1). Not starting the runner so jobs don't run without these tools."
+      log "Fix the package list (Settings → Extra CI Tools) or use an image that has them, then start the runner again."
+      exit 1
+    }
 
     # Use the image's Actions runner if it has one, else download it.
     RUNNER_HOME=""
@@ -25,7 +37,7 @@ enum ContainerRunnerScript {
     if [ -z "$RUNNER_HOME" ]; then
       RUNNER_HOME=/runner
       log "No Actions runner in this image; downloading $MR_RUNNER_URL"
-      mkdir -p "$RUNNER_HOME"
+      ensure_dir "$RUNNER_HOME"
       cd "$RUNNER_HOME"
       curl -fsSL -o runner.tar.gz "$MR_RUNNER_URL"
       tar -xzf runner.tar.gz
@@ -40,27 +52,32 @@ enum ContainerRunnerScript {
         packages="${MR_APT_PACKAGES:-}"
         if [ "${MR_INSTALL_GH:-0}" = 1 ] && ! command -v gh >/dev/null 2>&1; then
           log "Adding the GitHub CLI apt repository"
-          $SUDO apt-get update -qq
-          $SUDO apt-get install -y -qq --no-install-recommends curl ca-certificates >/dev/null
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-            | $SUDO tee /usr/share/keyrings/githubcli-archive-keyring.gpg >/dev/null
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-            | $SUDO tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+          if ! { $SUDO apt-get update -qq \
+                 && $SUDO apt-get install -y -qq --no-install-recommends curl ca-certificates >/dev/null \
+                 && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+                    | $SUDO tee /usr/share/keyrings/githubcli-archive-keyring.gpg >/dev/null \
+                 && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+                    | $SUDO tee /etc/apt/sources.list.d/github-cli.list >/dev/null; }; then
+            fail_tools "could not add the GitHub CLI apt repository"
+          fi
           packages="$packages gh"
         fi
-        if [ -n "${packages// /}" ]; then
-          log "Installing tools:$packages"
-          $SUDO apt-get update -qq
+        packages="$(echo $packages)"  # normalize spacing
+        if [ -n "$packages" ]; then
+          log "Installing tools: $packages"
+          $SUDO apt-get update -qq || log "apt-get update failed; trying the install anyway"
           # shellcheck disable=SC2086
-          $SUDO apt-get install -y -qq --no-install-recommends $packages >/dev/null || log "Some tools failed to install"
+          $SUDO apt-get install -y -qq --no-install-recommends $packages >/dev/null \
+            || fail_tools "could not install: $packages"
         fi
       else
         log "This image has no apt-get; skipping tool installation"
       fi
     fi
 
-    # Keep job workspaces and diagnostics on the host.
-    mkdir -p "$MR_WORK_DIR" "$MR_DIAG_DIR"
+    # Keep job workspaces and diagnostics on the host, writable by this user.
+    ensure_dir "$MR_WORK_DIR"
+    ensure_dir "$MR_DIAG_DIR"
     if [ ! -L "$RUNNER_HOME/_diag" ]; then
       rm -rf "$RUNNER_HOME/_diag"
       ln -s "$MR_DIAG_DIR" "$RUNNER_HOME/_diag"

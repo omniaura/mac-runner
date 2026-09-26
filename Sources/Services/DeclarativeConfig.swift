@@ -179,8 +179,9 @@ struct DeclarativeConfig: Codable, Equatable {
 
     // MARK: - Resolution
 
-    /// Runner specs expanded (`count`) and validated.
-    func desiredRunners() throws -> [DesiredRunner] {
+    /// Runner specs expanded (`count`) and validated. `globalIsolation` is the
+    /// global mode that will apply (for runners that don't set `isolation`).
+    func desiredRunners(globalIsolation: IsolationMode = IsolationMode.none) throws -> [DesiredRunner] {
         var result: [DesiredRunner] = []
         for spec in runners {
             let name = spec.name.trimmingCharacters(in: .whitespaces)
@@ -208,8 +209,9 @@ struct DeclarativeConfig: Codable, Equatable {
                 throw DeclarativeConfigError.invalid("\(name): count must be between 1 and 50")
             }
             let isolation = try Self.isolation(spec.isolation, context: name)
-            if spec.image != nil && isolation != .container {
-                throw DeclarativeConfigError.invalid("\(name): image requires isolation: container")
+            let effectiveIsolation = isolation ?? globalIsolation
+            if spec.image != nil && effectiveIsolation != .container {
+                throw DeclarativeConfigError.invalid("\(name): image requires container isolation")
             }
             if let openFiles = spec.openFiles, openFiles < 1 {
                 throw DeclarativeConfigError.invalid("\(name): open-files must be positive")
@@ -218,7 +220,7 @@ struct DeclarativeConfig: Codable, Equatable {
             let desired = DesiredRunner(
                 name: name,
                 target: target,
-                labels: spec.labels ?? Runner.defaultLabels(for: isolation ?? IsolationMode.none),
+                labels: spec.labels ?? Runner.defaultLabels(for: effectiveIsolation),
                 isolation: isolation,
                 enableGUI: spec.enableGUI ?? false,
                 openFileLimit: spec.openFiles,
