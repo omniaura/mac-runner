@@ -1,3 +1,10 @@
+## [1.19.1](https://github.com/omniaura/mac-runner/compare/v1.19.0...v1.19.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* register supported runner versions and repair dedicated-user isolation ([#84](https://github.com/omniaura/mac-runner/issues/84)) ([c22adae](https://github.com/omniaura/mac-runner/commit/c22adae907f0b0b4306e6ef9f1bbe3ca087416a2)), closes [#82](https://github.com/omniaura/mac-runner/issues/82) [#83](https://github.com/omniaura/mac-runner/issues/83)
+
 # [1.19.0](https://github.com/omniaura/mac-runner/compare/v1.18.0...v1.19.0) (2026-08-29)
 
 
