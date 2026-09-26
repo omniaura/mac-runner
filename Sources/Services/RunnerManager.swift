@@ -75,6 +75,7 @@ class RunnerManager: ObservableObject {
     private let restartMaxDelaySeconds = 60
     private var installedUpdateVersion: String?
     private var lastAutomaticDiskCleanupCheck: Date?
+    private var lastLogMaintenance: Date?
     private let powerMonitor = PowerSourceMonitor()
     /// Only the menu bar app pauses/resumes runners automatically; one-shot CLI
     /// commands also construct a RunnerManager and must not.
@@ -686,10 +687,11 @@ class RunnerManager: ObservableObject {
                     repositoryURL: runner.target.registrationURL,
                     registrationToken: registrationToken,
                     openFileLimit: runner.effectiveOpenFileLimit(global: currentSettings.openFileLimit),
-                    logFileURL: {
+                    logWriter: try {
                         RunnerLogs.rotateIfNeeded(logFile)
                         RunnerLogs.pruneDiagnostics(runnerDirectory: runnerDir)
-                        return URL(fileURLWithPath: logFile)
+                        // Fail the start rather than run a container whose output goes nowhere.
+                        return try FileLogWriter(path: logFile)
                     }()
                 )
 
@@ -1246,6 +1248,7 @@ class RunnerManager: ObservableObject {
         }
 
         runAutomaticDiskCleanupIfNeeded()
+        maintainRunnerLogsIfNeeded()
 
         if automationEnabled {
             reloadExternalConfigChanges()
@@ -1264,6 +1267,31 @@ class RunnerManager: ObservableObject {
         let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
         let directory = RunnerDirectory.directoryURL(for: runner.id, isolation: isolation).path
         return RunnerLogs.path(for: source, runnerDirectory: directory)
+    }
+
+    /// Hourly log upkeep for runners that stay up for a long time (starting a
+    /// runner already rotates and prunes). Old `_diag` files are pruned by
+    /// modification time, so files still being written are never touched.
+    /// `runner.log` is only rotated while the runner is idle: the listener
+    /// writes a line or two per job, so no output can land between the copy
+    /// and the truncate.
+    private func maintainRunnerLogsIfNeeded(now: Date = Date()) {
+        if let lastCheck = lastLogMaintenance, now.timeIntervalSince(lastCheck) < 3600 {
+            return
+        }
+        lastLogMaintenance = now
+
+        for runner in runners where runner.status == .running {
+            let isolation = runner.effectiveIsolationMode(global: currentSettings.isolationMode)
+            let directory = RunnerDirectory.directoryURL(for: runner.id, isolation: isolation).path
+            var serviceUser: String?
+            if case .dedicatedUser(let username) = isolation { serviceUser = username }
+
+            RunnerLogs.pruneDiagnostics(runnerDirectory: directory, serviceUser: serviceUser)
+            if !runner.busy {
+                RunnerLogs.rotateIfNeeded(RunnerLogs.outputLogPath(runnerDirectory: directory), serviceUser: serviceUser)
+            }
+        }
     }
 
     private func runAutomaticDiskCleanupIfNeeded(now: Date = Date()) {

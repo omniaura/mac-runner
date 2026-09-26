@@ -144,6 +144,18 @@ final class RunnerLogsTests: XCTestCase {
         XCTAssertEqual(follower.readNewLines(), ["partial line", "written between tail and follow"])
     }
 
+    func testFollowerFlushesAnOversizedUnterminatedLine() throws {
+        let handle = try RunnerLogs.openForAppending(path("runner.log"))
+        let follower = LogFollower(path: path("runner.log"), offset: 0)
+        handle.write(Data(repeating: UInt8(ascii: "x"), count: LogFollower.maxPendingBytes + 1))
+        let lines = follower.readNewLines()
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertEqual(lines.first?.count, LogFollower.maxPendingBytes + 1)
+        handle.write(Data("next\n".utf8))
+        XCTAssertEqual(follower.readNewLines(), ["next"])
+        try handle.close()
+    }
+
     func testFollowerKeepsUTF8CharactersSplitAcrossReads() throws {
         let bytes = Array("café ✓\n".utf8)
         let split = bytes.firstIndex(of: 0xC3)! + 1  // between the two bytes of "é"
@@ -174,7 +186,7 @@ final class RunnerLogsTests: XCTestCase {
             LogsCommand(runnerName: "r", lines: 200, follow: true, source: .diagnostics)
         )
         XCTAssertEqual(try LogsCommand.parse(["r", "--job"]).get().source, .jobDiagnostics)
-        for args in [[], ["r", "-n", "0"], ["r", "--bogus"], ["a", "b"], ["r", "--lines"]] {
+        for args in [[], ["r", "-n", "0"], ["r", "--bogus"], ["a", "b"], ["r", "--lines"], ["r", "--diag", "--job"]] {
             if case .success = LogsCommand.parse(args) {
                 XCTFail("expected failure for \(args)")
             }

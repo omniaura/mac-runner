@@ -145,10 +145,9 @@ class ContainerIsolationService {
             ]
             containerConfig.process.workingDirectory = "/runner"
 
-            if let logFileURL = config.logFileURL,
-               let writer = try? FileLogWriter(path: logFileURL.path) {
-                containerConfig.process.stdout = writer
-                containerConfig.process.stderr = writer
+            if let logWriter = config.logWriter {
+                containerConfig.process.stdout = logWriter
+                containerConfig.process.stderr = logWriter
             }
 
             // Set environment variables
@@ -364,9 +363,9 @@ struct ContainerRunnerConfiguration {
     /// Maximum open file limit to set before starting the runner.
     var openFileLimit: Int = ResourceLimits.defaultOpenFileLimit
 
-    /// Host file that receives the container process's stdout and stderr
-    /// (the runner's `runner.log`), so logs work the same as other modes.
-    var logFileURL: URL?
+    /// Receives the container process's stdout and stderr (the runner's
+    /// `runner.log` on the host), so logs work the same as other modes.
+    var logWriter: FileLogWriter?
 
     /// Default container image for GitHub Actions runners.
     static let defaultRunnerImage = "ghcr.io/actions/runner:latest"

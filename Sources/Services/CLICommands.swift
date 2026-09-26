@@ -159,11 +159,12 @@ struct LogsCommand: Equatable {
             case "-f", "--follow":
                 command.follow = true
                 i += 1
-            case "--diag":
-                command.source = .diagnostics
-                i += 1
-            case "--job":
-                command.source = .jobDiagnostics
+            case "--diag", "--job":
+                let source: RunnerLogs.Source = arg == "--diag" ? .diagnostics : .jobDiagnostics
+                guard command.source == .output || command.source == source else {
+                    return .failure(.message("--diag and --job can't be combined"))
+                }
+                command.source = source
                 i += 1
             default:
                 guard !arg.hasPrefix("-"), name == nil else {

@@ -204,6 +204,8 @@ final class LogFollower {
     /// Bytes after the last newline, kept raw so a UTF-8 character split
     /// across reads isn't mangled.
     private var pending = Data()
+    /// An unterminated line longer than this is emitted as-is instead of buffered further.
+    static let maxPendingBytes = 1024 * 1024
 
     /// Follow from `offset` (e.g. where `RunnerLogs.tail` stopped).
     init(path: String, offset: UInt64) {
@@ -243,7 +245,12 @@ final class LogFollower {
         pending.append(data)
 
         // Newlines are single bytes in UTF-8, so splitting there never cuts a character.
-        guard let lastNewline = pending.lastIndex(of: 0x0A) else { return [] }
+        guard let lastNewline = pending.lastIndex(of: 0x0A) else {
+            guard pending.count > Self.maxPendingBytes else { return [] }
+            let line = String(decoding: pending, as: UTF8.self)
+            pending = Data()
+            return [line]
+        }
         let complete = pending[pending.startIndex...lastNewline]
         pending = Data(pending[pending.index(after: lastNewline)...])
         return RunnerLogs.splitLines(String(decoding: complete, as: UTF8.self))
