@@ -128,3 +128,49 @@ final class ProcessTreeKillTests: XCTestCase {
         XCTAssertEqual(sleeper.terminationStatus, SIGTERM)
     }
 }
+
+final class ServiceUserInstallFallbackTests: XCTestCase {
+    func testCorruptArchiveFallsThroughToNextURL() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("installer-\(UUID().uuidString)", isDirectory: true)
+        let source = directory.appendingPathComponent("source", isDirectory: true)
+        let target = directory.appendingPathComponent("target", isDirectory: true)
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("bin"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        for file in ["config.sh", "run.sh", "bin/Runner.Listener"] {
+            try "#!/bin/sh\n".write(to: source.appendingPathComponent(file), atomically: true, encoding: .utf8)
+        }
+        let corrupt = directory.appendingPathComponent("corrupt.tar.gz")
+        try Data("not a tarball".utf8).write(to: corrupt)
+        let good = directory.appendingPathComponent("good.tar.gz")
+        XCTAssertTrue(try ProcessExecutor.run("/usr/bin/tar", arguments: ["-czf", good.path, "-C", source.path, "."]).succeeded)
+
+        let command = RunnerInstaller.serviceUserInstallCommand(
+            directory: target.path,
+            downloadURLs: [corrupt.absoluteString, good.absoluteString]
+        )
+        let result = try ProcessExecutor.run("/bin/bash", arguments: ["-c", command])
+
+        XCTAssertTrue(result.succeeded, result.output)
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: target.appendingPathComponent("bin/Runner.Listener").path))
+    }
+}
+
+final class ServiceUserLogCommandTests: XCTestCase {
+    func testLogIsWritableOnlyByOwnerAndNamedWriter() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("log-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = directory.appendingPathComponent("runner.log").path
+
+        let command = ProcessManager.serviceUserLogCommand(logFile: log, writer: NSUserName())
+        let result = try ProcessExecutor.run("/bin/bash", arguments: ["-c", command + " && ls -le " + "'\(log)'"])
+
+        XCTAssertTrue(result.succeeded, result.output)
+        XCTAssertTrue(result.output.contains("-rw-r--r--+"), result.output)
+        XCTAssertTrue(result.output.contains("user:\(NSUserName()) allow write,append"), result.output)
+    }
+}

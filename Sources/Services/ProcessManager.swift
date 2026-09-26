@@ -68,16 +68,15 @@ class ProcessManager {
                 owner: username
             )
 
-            // The workspace is owned by the service user, so it creates the log.
-            // Group-writable so the host user (in staff) can open it for the
-            // runner's output and append its own events.
-            let escapedLog = logFile.replacingOccurrences(of: "'", with: "'\\''")
+            // The workspace is owned by the service user, so it creates the log and
+            // grants only the host user (via ACL) write access, so we can open it
+            // for the runner's output and append our own events.
             try ProcessExecutor.runOrThrow(
                 "/usr/bin/sudo",
                 arguments: UserIsolationService.sudoShellArguments(
                     username: username,
                     shell: "/bin/bash",
-                    command: "touch '\(escapedLog)' && chmod 664 '\(escapedLog)'"
+                    command: Self.serviceUserLogCommand(logFile: logFile, writer: NSUserName())
                 ),
                 errorMessage: "Failed to create runner log"
             )
@@ -112,6 +111,14 @@ class ProcessManager {
         try pidManager.writePID(pid, for: id)
 
         return process
+    }
+
+    /// Shell command (run as the service user) that creates the runner log,
+    /// readable by all but writable only by its owner and `writer`.
+    static func serviceUserLogCommand(logFile: String, writer: String) -> String {
+        let log = "'" + logFile.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let acl = "'" + "user:\(writer) allow write,append".replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return "touch \(log) && chmod 644 \(log) && chmod -N \(log) && chmod +a \(acl) \(log)"
     }
 
     /// Stops a runner process by killing its entire process tree

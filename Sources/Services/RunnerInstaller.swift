@@ -71,11 +71,13 @@ class RunnerInstaller {
         }
 
         let urls = downloadURLs.map(quoted).joined(separator: " ")
+        // Each URL must both download and extract before we stop, so a corrupt
+        // archive falls through to the next (pinned) version.
         return """
-        set -e; cd \(quoted(directory)); \
-        for url in \(urls); do echo "Downloading runner from: $url"; \
-        curl -fsSL --retry 2 -o runner.tar.gz "$url" && break; rm -f runner.tar.gz; done; \
-        test -f runner.tar.gz; tar -xzf runner.tar.gz; rm -f runner.tar.gz; \
+        cd \(quoted(directory)) || exit 1; installed=; \
+        for url in \(urls); do echo "Downloading runner from: $url"; rm -f runner.tar.gz; \
+        if curl -fsSL --retry 2 -o runner.tar.gz "$url" && tar -xzf runner.tar.gz; then installed=1; break; fi; done; \
+        rm -f runner.tar.gz; test -n "$installed" || exit 1; \
         chmod 755 config.sh run.sh bin/Runner.Listener
         """
     }
@@ -113,21 +115,13 @@ class RunnerInstaller {
             return
         }
 
-        let tarGzPath = "\(directory)/runner.tar.gz"
-
-        // Download tar.gz, retrying with the pinned version if the resolved
-        // release's assets aren't available yet.
+        // Download and extract, retrying with the pinned version if the resolved
+        // release's assets are missing or unusable.
         do {
-            try await downloadRunner(version: runnerVersion, arch: arch, to: tarGzPath)
+            try await downloadAndExtractRunner(version: runnerVersion, arch: arch, to: directory)
         } catch where runnerVersion != Self.fallbackRunnerVersion {
-            try await downloadRunner(version: Self.fallbackRunnerVersion, arch: arch, to: tarGzPath)
+            try await downloadAndExtractRunner(version: Self.fallbackRunnerVersion, arch: arch, to: directory)
         }
-
-        // Extract
-        try await extractTarGz(at: tarGzPath, to: directory)
-
-        // Clean up
-        try FileManager.default.removeItem(atPath: tarGzPath)
 
         // Make scripts executable
         try makeExecutable("\(directory)/config.sh")
@@ -285,10 +279,16 @@ class RunnerInstaller {
 
     // MARK: - Private Helpers
 
-    private func downloadRunner(version: String, arch: String, to destination: String) async throws {
+    private func downloadAndExtractRunner(version: String, arch: String, to directory: String) async throws {
+        let tarGzPath = "\(directory)/runner.tar.gz"
+        // moveItem won't overwrite, so clear any archive left by an earlier attempt.
+        try? FileManager.default.removeItem(atPath: tarGzPath)
+        defer { try? FileManager.default.removeItem(atPath: tarGzPath) }
+
         let downloadURL = Self.downloadURL(version: version, arch: arch)
         print("Downloading runner from: \(downloadURL)")
-        try await downloadFile(from: downloadURL, to: destination)
+        try await downloadFile(from: downloadURL, to: tarGzPath)
+        try await extractTarGz(at: tarGzPath, to: directory)
     }
 
     private func downloadFile(from urlString: String, to destination: String) async throws {
