@@ -48,7 +48,7 @@ final class ContainerRunnerTests: XCTestCase {
 
         let argsFile = root.appendingPathComponent("config-args").path
         try "#!/bin/bash\nprintf '%s\\n' \"$@\" > '\(argsFile)'\n".write(to: runnerHome.appendingPathComponent("config.sh"), atomically: true, encoding: .utf8)
-        try "#!/bin/bash\necho \"run.sh token=${MR_TOKEN:-unset}\"\n".write(to: runnerHome.appendingPathComponent("run.sh"), atomically: true, encoding: .utf8)
+        try "#!/bin/bash\necho \"run.sh token=${MR_TOKEN:-unset} ci=${CI:-unset} headless=${HEADLESS:-unset}\"\n".write(to: runnerHome.appendingPathComponent("run.sh"), atomically: true, encoding: .utf8)
         for script in ["config.sh", "run.sh"] {
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: runnerHome.appendingPathComponent(script).path)
         }
@@ -75,7 +75,7 @@ final class ContainerRunnerTests: XCTestCase {
         process.waitUntilExit()
 
         XCTAssertEqual(process.terminationStatus, 0, output)
-        XCTAssertTrue(output.contains("run.sh token=unset"), "token is cleared before run.sh: \(output)")
+        XCTAssertTrue(output.contains("run.sh token=unset ci=true headless=true"), "token cleared and headless env set: \(output)")
         let args = try String(contentsOfFile: argsFile, encoding: .utf8).split(separator: "\n").map(String.init)
         XCTAssertEqual(args, [
             "--unattended", "--replace",
@@ -166,5 +166,83 @@ final class ContainerRunnerTests: XCTestCase {
         XCTAssertEqual(runners.first?.labels, ["linux", "mac-runner"])
         XCTAssertEqual(runners.first?.containerImage, "ubuntu:24.04")
         XCTAssertThrowsError(try config.desiredRunners(globalIsolation: IsolationMode.none))
+    }
+
+    func testGUIFlagAndDisplayAreInTheEnvironment() {
+        var gui = config()
+        gui.enableGUI = true
+        XCTAssertTrue(ContainerRunnerScript.environment(for: gui).contains("MR_ENABLE_GUI=1"))
+        XCTAssertTrue(ContainerRunnerScript.environment(for: gui).contains("MR_DISPLAY=:99"))
+        XCTAssertTrue(ContainerRunnerScript.environment(for: config()).contains("MR_ENABLE_GUI=0"))
+    }
+
+    /// Runs the startup script's GUI path with a stub Xvfb in a scratch runner.
+    private func runGUIStartup(xvfbStub: String?) throws -> (status: Int32, output: String, registered: Bool) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ctr-gui-\(UUID().uuidString)", isDirectory: true)
+        // Unix socket paths are limited to ~104 bytes; keep this one short.
+        let x11 = "/tmp/mrx-\(UUID().uuidString.prefix(8))"
+        let runnerHome = root.appendingPathComponent("home-runner", isDirectory: true)
+        let bin = root.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: runnerHome, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: x11, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(atPath: x11)
+        }
+
+        let registered = root.appendingPathComponent("registered").path
+        try "#!/bin/bash\ntouch '\(registered)'\n".write(to: runnerHome.appendingPathComponent("config.sh"), atomically: true, encoding: .utf8)
+        try "#!/bin/bash\necho \"run.sh DISPLAY=${DISPLAY:-unset}\"\n".write(to: runnerHome.appendingPathComponent("run.sh"), atomically: true, encoding: .utf8)
+        var executables = [runnerHome.appendingPathComponent("config.sh"), runnerHome.appendingPathComponent("run.sh")]
+        if let xvfbStub {
+            try xvfbStub.write(to: bin.appendingPathComponent("Xvfb"), atomically: true, encoding: .utf8)
+            executables.append(bin.appendingPathComponent("Xvfb"))
+        }
+        for file in executables {
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        }
+
+        var gui = self.config()
+        gui.enableGUI = true
+        var environment = ContainerRunnerScript.environment(for: gui).reduce(into: [String: String]()) { result, pair in
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            result[String(parts[0])] = parts.count > 1 ? String(parts[1]) : ""
+        }
+        environment["MR_RUNNER_CANDIDATES"] = runnerHome.path
+        environment["MR_WORK_DIR"] = root.appendingPathComponent("work").path
+        environment["MR_DIAG_DIR"] = root.appendingPathComponent("diag").path
+        environment["MR_SUDO"] = ""
+        environment["MR_APT_PACKAGES"] = ""
+        environment["MR_INSTALL_GH"] = "0"
+        environment["MR_X11_DIR"] = x11
+        environment["PATH"] = "\(bin.path):/usr/bin:/bin"
+
+        let result = try runScript(environment: environment)
+        return (result.status, result.output, FileManager.default.fileExists(atPath: registered))
+    }
+
+    func testGUIStartupExportsDisplayOnceItIsUp() throws {
+        // Stub Xvfb: creates the display's socket and keeps it open briefly.
+        let stub = "#!/bin/bash\nexec /usr/bin/python3 -c 'import os,socket,sys,time; s=socket.socket(socket.AF_UNIX); s.bind(os.path.join(os.environ[\"MR_X11_DIR\"], \"X\" + sys.argv[1].lstrip(\":\"))); time.sleep(5)' \"$1\"\n"
+        let result = try runGUIStartup(xvfbStub: stub)
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("Virtual display :99"), result.output)
+        XCTAssertTrue(result.output.contains("run.sh DISPLAY=:99"), result.output)
+        XCTAssertTrue(result.registered)
+    }
+
+    func testGUIStartupFailsWhenTheDisplayNeverComesUp() throws {
+        let result = try runGUIStartup(xvfbStub: "#!/bin/bash\nexit 1\n")
+        XCTAssertNotEqual(result.status, 0)
+        XCTAssertTrue(result.output.contains("virtual display :99 did not start"), result.output)
+        XCTAssertFalse(result.registered, "must not register a GUI runner without a display")
+    }
+
+    func testGUIStartupFailsWithoutXvfbOrApt() throws {
+        let result = try runGUIStartup(xvfbStub: nil)
+        XCTAssertNotEqual(result.status, 0)
+        XCTAssertTrue(result.output.contains("neither Xvfb nor apt-get"), result.output)
+        XCTAssertFalse(result.registered)
     }
 }

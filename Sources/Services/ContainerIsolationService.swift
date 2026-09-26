@@ -424,6 +424,9 @@ struct ContainerRunnerConfiguration {
     /// Tools to install when the container starts (see `ToolProvisioningService.plan`).
     var tools: [String] = []
 
+    /// Give the runner its own virtual X display (Xvfb) for GUI jobs.
+    var enableGUI: Bool = false
+
     /// Linux runner tarball, used only when the image doesn't include the runner.
     var runnerDownloadURL: String
 

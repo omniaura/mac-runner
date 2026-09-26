@@ -75,6 +75,34 @@ enum ContainerRunnerScript {
       fi
     fi
 
+    # GUI runners get their own virtual display; headless ones are marked as such.
+    if [ "${MR_ENABLE_GUI:-0}" = 1 ]; then
+      if ! command -v Xvfb >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+        log "Installing Xvfb for this runner's virtual display"
+        $SUDO apt-get update -qq || log "apt-get update failed; trying the install anyway"
+        DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq --no-install-recommends xvfb xauth >/dev/null \
+          || log "Could not install Xvfb"
+      fi
+      if ! command -v Xvfb >/dev/null 2>&1; then
+        log "ERROR: GUI access needs Xvfb, and this image has neither Xvfb nor apt-get. Use an image with Xvfb, or turn off GUI access."
+        exit 1
+      fi
+      x11_socket="${MR_X11_DIR:-/tmp/.X11-unix}/X${MR_DISPLAY#:}"
+      Xvfb "$MR_DISPLAY" -screen 0 "${MR_DISPLAY_SIZE:-1920x1080x24}" -nolisten tcp >/dev/null 2>&1 &
+      for _ in $(seq 1 100); do
+        [ -S "$x11_socket" ] && break
+        sleep 0.1
+      done
+      if [ ! -S "$x11_socket" ]; then
+        log "ERROR: the virtual display $MR_DISPLAY did not start. Not starting the runner so GUI jobs don't run without a display."
+        exit 1
+      fi
+      export DISPLAY="$MR_DISPLAY"
+      log "Virtual display $DISPLAY (${MR_DISPLAY_SIZE:-1920x1080x24})"
+    else
+      export CI=true HEADLESS=true
+    fi
+
     # Keep job workspaces and diagnostics on the host, writable by this user.
     ensure_dir "$MR_WORK_DIR"
     ensure_dir "$MR_DIAG_DIR"
@@ -91,6 +119,10 @@ enum ContainerRunnerScript {
     ulimit -n "$MR_OPEN_FILES" 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
     exec ./run.sh
     """#
+
+    /// X display for GUI-enabled container runners. Each runner has its own VM,
+    /// so every runner gets a separate display even though the name is shared.
+    static let displayName = ":99"
 
     /// DNS-safe hostname for a runner's container.
     static func hostname(for runnerName: String) -> String {
@@ -134,6 +166,8 @@ enum ContainerRunnerScript {
             "MR_DIAG_DIR=\(diagnosticsMount)",
             "MR_APT_PACKAGES=\(apt.packages.joined(separator: " "))",
             "MR_INSTALL_GH=\(apt.installGitHubCLI ? 1 : 0)",
+            "MR_ENABLE_GUI=\(config.enableGUI ? 1 : 0)",
+            "MR_DISPLAY=\(displayName)",
         ]
     }
 }

@@ -206,7 +206,9 @@ struct AddRunnerView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Enable GUI Access")
                                     .font(.subheadline)
-                                Text("Allow runner to access display (default: headless)")
+                                Text(selectedIsolation == .container
+                                    ? "Give this runner its own virtual display (Xvfb) inside its VM (default: headless)"
+                                    : "Allow runner to access display (default: headless)")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
