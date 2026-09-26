@@ -255,7 +255,7 @@ enum CLIHandler {
                 let mode = args[i + 1].lowercased()
                 switch mode {
                 case "none":
-                    isolationMode = .none
+                    isolationMode = IsolationMode.none  // not `.none`, which would be Optional.none (use global)
                 case "user":
                     isolationMode = .dedicatedUser(username: IsolationMode.defaultUsername)
                 case "container":

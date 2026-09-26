@@ -68,17 +68,18 @@ class ProcessManager {
                 owner: username
             )
 
-            // Create log file and set ownership
-            FileManager.default.createFile(atPath: logFile, contents: nil)
-
-            // Set ownership via sudo chown
-            let chown = Process()
-            chown.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-            chown.arguments = ["-n", "chown", "\(username):staff", logFile]
-            chown.standardOutput = FileHandle.nullDevice
-            chown.standardError = FileHandle.nullDevice
-            try chown.run()
-            chown.waitUntilExit()
+            // The workspace is owned by the service user, so it creates the log and
+            // grants only the host user (via ACL) write access, so we can open it
+            // for the runner's output and append our own events.
+            try ProcessExecutor.runOrThrow(
+                "/usr/bin/sudo",
+                arguments: UserIsolationService.sudoShellArguments(
+                    username: username,
+                    shell: "/bin/bash",
+                    command: Self.serviceUserLogCommand(logFile: logFile, writer: NSUserName())
+                ),
+                errorMessage: "Failed to create runner log"
+            )
 
             // Open log file for writing
             guard let logHandle = FileHandle(forWritingAtPath: logFile) else {
@@ -112,6 +113,14 @@ class ProcessManager {
         return process
     }
 
+    /// Shell command (run as the service user) that creates the runner log,
+    /// readable by all but writable only by its owner and `writer`.
+    static func serviceUserLogCommand(logFile: String, writer: String) -> String {
+        let log = "'" + logFile.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let acl = "'" + "user:\(writer) allow write,append".replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return "touch \(log) && chmod 644 \(log) && chmod -N \(log) && chmod +a \(acl) \(log)"
+    }
+
     /// Stops a runner process by killing its entire process tree
     ///
     /// - Parameters:
@@ -137,14 +146,12 @@ class ProcessManager {
         }
 
         // Kill process tree based on isolation mode
-        let useSudo: Bool
         switch isolation {
         case .none, .container:
-            useSudo = false
-        case .dedicatedUser:
-            useSudo = true
+            ProcessUtils.killProcessTree(actualPid)
+        case .dedicatedUser(let username):
+            ProcessUtils.killProcessTree(actualPid, serviceUser: username)
         }
-        ProcessUtils.killProcessTree(actualPid, useSudo: useSudo)
 
         // Clean up PID file
         pidManager.removePID(for: id)

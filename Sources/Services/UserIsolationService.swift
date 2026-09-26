@@ -168,23 +168,12 @@ class UserIsolationService {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
 
         // Use -n (non-interactive) and zsh -l to source .zprofile for PATH/TMPDIR
-        let escapedDir = currentDirectory.replacingOccurrences(of: "'", with: "'\\''")
-        let escapedExec = executable.replacingOccurrences(of: "'", with: "'\\''")
+        let command = ResourceLimits.shellCommand(
+            Self.launchCommand(directory: currentDirectory, executable: executable, enableGUI: enableGUI),
+            openFileLimit: openFileLimit
+        )
 
-        // Build command with headless environment if GUI is disabled
-        var command = "cd '\(escapedDir)' && '\(escapedExec)'"
-        if !enableGUI {
-            // Prepend environment variables to remove GUI access
-            command = "env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE -u XDG_RUNTIME_DIR CI=true HEADLESS=true " + command
-        }
-
-        command = ResourceLimits.shellCommand(command, openFileLimit: openFileLimit)
-
-        process.arguments = [
-            "-n", "-u", username,
-            "/bin/zsh", "-l", "-c",
-            command
-        ]
+        process.arguments = Self.sudoShellArguments(username: username, shell: "/bin/zsh", command: command)
 
         if let stdout = standardOutput {
             process.standardOutput = stdout
@@ -197,8 +186,29 @@ class UserIsolationService {
         return process
     }
 
+    /// Shell command that starts the runner in its directory, stripping GUI
+    /// access from its environment when `enableGUI` is false.
+    static func launchCommand(directory: String, executable: String, enableGUI: Bool) -> String {
+        let escapedDir = directory.replacingOccurrences(of: "'", with: "'\\''")
+        let escapedExec = executable.replacingOccurrences(of: "'", with: "'\\''")
+        // `env` must wrap the executable itself, not `cd`, or the variables never reach the runner.
+        let headlessEnv = enableGUI
+            ? ""
+            : "env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE -u XDG_RUNTIME_DIR CI=true HEADLESS=true "
+        return "cd '\(escapedDir)' && \(headlessEnv)'\(escapedExec)'"
+    }
+
+    /// sudo arguments for running `command` in a login shell as the service user.
+    ///
+    /// `-H` makes sudo set HOME to the service user's home. macOS's default
+    /// sudoers keeps the caller's HOME, which would otherwise make jobs write
+    /// to (and the login shell source profiles from) the host user's home.
+    static func sudoShellArguments(username: String, shell: String, command: String) -> [String] {
+        ["-n", "-H", "-u", username, shell, "-l", "-c", command]
+    }
+
     func killProcessTree(pid: pid_t, username: String) {
-        ProcessUtils.killProcessTree(pid, useSudo: true)
+        ProcessUtils.killProcessTree(pid, serviceUser: username)
     }
 
     // MARK: - Sudoers
@@ -210,7 +220,7 @@ class UserIsolationService {
         # Mac Runner: allow \(mainUsername) to manage runner processes as \(serviceUsername)
         \(mainUsername) ALL=(\(serviceUsername)) NOPASSWD: /bin/bash -l -c *
         \(mainUsername) ALL=(\(serviceUsername)) NOPASSWD: /bin/zsh -l -c *
-        \(mainUsername) ALL=(root) NOPASSWD: /usr/bin/kill
+        \(mainUsername) ALL=(root) NOPASSWD: /bin/kill
         \(mainUsername) ALL=(root) NOPASSWD: /bin/mkdir -p /Users/\(serviceUsername)/*
         \(mainUsername) ALL=(root) NOPASSWD: /usr/sbin/chown -R \(serviceUsername)\\:staff /Users/\(serviceUsername)/*
         """

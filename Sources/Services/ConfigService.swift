@@ -172,7 +172,19 @@ class RunnerDirectory {
 
         let remove = Process()
         remove.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-        remove.arguments = ["-n", "rm", "-rf", path]
+        let owner = (try? FileManager.default.attributesOfItem(atPath: path))?[.ownerAccountName] as? String
+        if let owner, owner != "root", owner != NSUserName() {
+            // Service-user workspaces are deleted by their owner through the
+            // passwordless `sudo -u` shell entry; sudoers doesn't allow root rm.
+            let escapedPath = path.replacingOccurrences(of: "'", with: "'\\''")
+            remove.arguments = UserIsolationService.sudoShellArguments(
+                username: owner,
+                shell: "/bin/bash",
+                command: "rm -rf '\(escapedPath)'"
+            )
+        } else {
+            remove.arguments = ["-n", "rm", "-rf", path]
+        }
         remove.standardOutput = FileHandle.nullDevice
         remove.standardError = FileHandle.nullDevice
         try remove.run()
