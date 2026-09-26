@@ -177,7 +177,11 @@ final class ContainerRunnerTests: XCTestCase {
     }
 
     /// Runs the startup script's GUI path with a stub Xvfb in a scratch runner.
-    private func runGUIStartup(xvfbStub: String?, xdpyinfoStub: String? = nil) throws -> (status: Int32, output: String, registered: Bool) {
+    private func runGUIStartup(
+        xvfbStub: String?,
+        xdpyinfoStub: String? = nil,
+        extraEnvironment: [String: String] = [:]
+    ) throws -> (status: Int32, output: String, registered: Bool) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ctr-gui-\(UUID().uuidString)", isDirectory: true)
         // Unix socket paths are limited to ~104 bytes; keep this one short.
         let x11 = "/tmp/mrx-\(UUID().uuidString.prefix(8))"
@@ -221,6 +225,7 @@ final class ContainerRunnerTests: XCTestCase {
         environment["MR_INSTALL_GH"] = "0"
         environment["MR_X11_DIR"] = x11
         environment["PATH"] = "\(bin.path):/usr/bin:/bin"
+        environment.merge(extraEnvironment) { _, new in new }
 
         let result = try runScript(environment: environment)
         return (result.status, result.output, FileManager.default.fileExists(atPath: registered))
@@ -228,8 +233,7 @@ final class ContainerRunnerTests: XCTestCase {
 
     func testGUIStartupExportsDisplayOnceItIsUp() throws {
         // Stub Xvfb: creates the display's socket and keeps it open briefly.
-        let stub = "#!/bin/bash\nexec /usr/bin/python3 -c 'import os,socket,sys,time; s=socket.socket(socket.AF_UNIX); s.bind(os.path.join(os.environ[\"MR_X11_DIR\"], \"X\" + sys.argv[1].lstrip(\":\"))); time.sleep(5)' \"$1\"\n"
-        let result = try runGUIStartup(xvfbStub: stub)
+        let result = try runGUIStartup(xvfbStub: Self.xvfbStub(listen: true, signalReady: true))
         XCTAssertEqual(result.status, 0, result.output)
         XCTAssertTrue(result.output.contains("Virtual display :99"), result.output)
         XCTAssertTrue(result.output.contains("run.sh DISPLAY=:99"), result.output)
@@ -250,23 +254,57 @@ final class ContainerRunnerTests: XCTestCase {
         XCTAssertFalse(result.registered)
     }
 
-    private static let socketStub = "#!/bin/bash\nexec /usr/bin/python3 -c 'import os,socket,sys,time; s=socket.socket(socket.AF_UNIX); s.bind(os.path.join(os.environ[\"MR_X11_DIR\"], \"X\" + sys.argv[1].lstrip(\":\"))); s.listen(1); time.sleep(5)' \"$1\"\n"
+    /// A stand-in Xvfb: binds the display socket, optionally listens, and
+    /// optionally reports readiness on -displayfd 3 (as the real Xvfb does).
+    private static func xvfbStub(listen: Bool, signalReady: Bool, exitAfterSocket: Bool = false) -> String {
+        let python = [
+            "import os,socket,sys,time",
+            "s=socket.socket(socket.AF_UNIX)",
+            "s.bind(os.path.join(os.environ['MR_X11_DIR'], 'X' + sys.argv[1].lstrip(':')))",
+            listen ? "s.listen(4)" : "pass",
+            signalReady ? "os.write(3, b'99\\n')" : "pass",
+            exitAfterSocket ? "sys.exit(0)" : "time.sleep(float(os.environ.get('STUB_LIFETIME', '5')))",
+        ].joined(separator: "; ")
+        return "#!/bin/bash\nexec /usr/bin/python3 -c \"\(python)\" \"$1\"\n"
+    }
+
+    /// A stand-in xdpyinfo that really connects to the display's socket.
+    private static let connectingXdpyinfo = "#!/bin/bash\nexec /usr/bin/python3 -c \"import os,socket; s=socket.socket(socket.AF_UNIX); s.connect(os.path.join(os.environ['MR_X11_DIR'], 'X' + os.environ['DISPLAY'].lstrip(':')))\"\n"
 
     func testGUIStartupFailsWhenXvfbExitsAfterCreatingItsSocket() throws {
-        let stub = "#!/bin/bash\n/usr/bin/python3 -c 'import os,socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(os.path.join(os.environ[\"MR_X11_DIR\"], \"X\" + sys.argv[1].lstrip(\":\")))' \"$1\"\nexit 1\n"
-        let result = try runGUIStartup(xvfbStub: stub)
+        let result = try runGUIStartup(xvfbStub: Self.xvfbStub(listen: true, signalReady: false, exitAfterSocket: true))
         XCTAssertNotEqual(result.status, 0, result.output)
         XCTAssertTrue(result.output.contains("did not start"), result.output)
         XCTAssertFalse(result.registered)
     }
 
-    func testGUIStartupRequiresAClientToConnectWhenXdpyinfoIsAvailable() throws {
-        let refused = try runGUIStartup(xvfbStub: Self.socketStub, xdpyinfoStub: "#!/bin/bash\nexit 1\n")
-        XCTAssertNotEqual(refused.status, 0, refused.output)
-        XCTAssertFalse(refused.registered)
+    func testGUIStartupWaitsForXvfbToReportReady() throws {
+        // Socket exists and accepts connections, but Xvfb never reported ready.
+        let result = try runGUIStartup(xvfbStub: Self.xvfbStub(listen: true, signalReady: false), xdpyinfoStub: Self.connectingXdpyinfo)
+        XCTAssertNotEqual(result.status, 0, result.output)
+        XCTAssertFalse(result.registered)
+    }
 
-        let accepted = try runGUIStartup(xvfbStub: Self.socketStub, xdpyinfoStub: "#!/bin/bash\n[ \"$DISPLAY\" = :99 ]\n")
+    func testGUIStartupRequiresAClientConnectionWhenXdpyinfoIsAvailable() throws {
+        let refused = try runGUIStartup(xvfbStub: Self.xvfbStub(listen: false, signalReady: true), xdpyinfoStub: Self.connectingXdpyinfo)
+        XCTAssertNotEqual(refused.status, 0, refused.output)
+        XCTAssertFalse(refused.registered, "a socket that refuses connections isn't a display")
+
+        let accepted = try runGUIStartup(xvfbStub: Self.xvfbStub(listen: true, signalReady: true), xdpyinfoStub: Self.connectingXdpyinfo)
         XCTAssertEqual(accepted.status, 0, accepted.output)
         XCTAssertTrue(accepted.registered)
+    }
+
+    func testGUIStartupDoesNotHangOnAStuckProbe() throws {
+        let start = Date()
+        // Xvfb stays up far longer than the readiness deadline; the stuck probe must not hold startup.
+        let result = try runGUIStartup(
+            xvfbStub: Self.xvfbStub(listen: true, signalReady: true),
+            xdpyinfoStub: "#!/bin/bash\nsleep 60\n",
+            extraEnvironment: ["STUB_LIFETIME": "60"]
+        )
+        XCTAssertNotEqual(result.status, 0, result.output)
+        XCTAssertFalse(result.registered)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 20, "readiness gives up after its deadline")
     }
 }

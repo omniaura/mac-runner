@@ -92,21 +92,38 @@ enum ContainerRunnerScript {
       # A leftover socket or lock would look like a running display.
       rm -f "$x11_socket" "/tmp/.X$display_number-lock" 2>/dev/null \
         || $SUDO rm -f "$x11_socket" "/tmp/.X$display_number-lock" 2>/dev/null || true
-      Xvfb "$MR_DISPLAY" -screen 0 "${MR_DISPLAY_SIZE:-1920x1080x24}" -nolisten tcp >/dev/null 2>&1 &
+      # -displayfd: Xvfb writes the display number to fd 3 only once it's
+      # initialized and accepting connections (the signal xvfb-run relies on).
+      ready_file="$(mktemp)"
+      Xvfb "$MR_DISPLAY" -displayfd 3 -screen 0 "${MR_DISPLAY_SIZE:-1920x1080x24}" -nolisten tcp \
+        3>"$ready_file" >/dev/null 2>&1 &
       xvfb_pid=$!
-      # Ready means: Xvfb is still running, its socket exists, and (when
-      # xdpyinfo is available) a client can actually connect.
-      display_ready=""
-      for _ in $(seq 1 100); do
-        kill -0 "$xvfb_pid" 2>/dev/null || break
-        if [ -S "$x11_socket" ]; then
-          if ! command -v xdpyinfo >/dev/null 2>&1 || DISPLAY="$MR_DISPLAY" xdpyinfo >/dev/null 2>&1; then
-            display_ready=1
-            break
+      # Connect a real client when xdpyinfo is available, giving up after 2s.
+      probe_display() {
+        command -v xdpyinfo >/dev/null 2>&1 || return 0
+        DISPLAY="$MR_DISPLAY" xdpyinfo >/dev/null 2>&1 &
+        local probe=$!
+        for _ in $(seq 1 20); do
+          if ! kill -0 "$probe" 2>/dev/null; then
+            wait "$probe"
+            return $?
           fi
+          sleep 0.1
+        done
+        kill "$probe" 2>/dev/null
+        return 1
+      }
+      display_ready=""
+      display_deadline=$((SECONDS + 10))
+      while [ "$SECONDS" -lt "$display_deadline" ]; do
+        kill -0 "$xvfb_pid" 2>/dev/null || break
+        if [ -s "$ready_file" ] && [ -S "$x11_socket" ] && probe_display; then
+          display_ready=1
+          break
         fi
         sleep 0.1
       done
+      rm -f "$ready_file"
       sleep 0.3
       kill -0 "$xvfb_pid" 2>/dev/null || display_ready=""
       if [ -z "$display_ready" ]; then
