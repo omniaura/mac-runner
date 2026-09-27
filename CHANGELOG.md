@@ -1,3 +1,10 @@
+## [1.25.1](https://github.com/omniaura/mac-runner/compare/v1.25.0...v1.25.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* use the current macOS requirement syntax in the cask ([#103](https://github.com/omniaura/mac-runner/issues/103)) ([90e28dc](https://github.com/omniaura/mac-runner/commit/90e28dca3996372ef3071aa1400c9d213f4100d3))
+
 # [1.25.0](https://github.com/omniaura/mac-runner/compare/v1.24.0...v1.25.0) (2026-09-26)
 
 
