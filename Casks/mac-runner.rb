@@ -7,7 +7,7 @@ cask "mac-runner" do
   desc "Menu bar app for managing GitHub Actions self-hosted runners"
   homepage "https://github.com/omniaura/mac-runner"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "MacRunner.app"
   binary "#{appdir}/MacRunner.app/Contents/MacOS/MacRunner", target: "mac-runner"
