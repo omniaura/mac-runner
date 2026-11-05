@@ -3,6 +3,12 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    # A docs-only change builds nothing. No branch protection requires this check, so a
+    # skipped run blocks no merge.
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
 
 concurrency:
   group: ci-${{ github.head_ref }}
@@ -11,23 +17,29 @@ concurrency:
 jobs:
   build-and-test:
     name: Build & Test
+    # Drafts run nothing; marking a pull request ready runs it.
+    if: github.event.pull_request.draft == false
     runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Xcode
+        id: xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
 
-      - name: Reset SwiftPM state
-        run: |
-          rm -rf .build
-          rm -f Package.resolved
-          rm -rf ~/Library/Caches/org.swift.swiftpm
-          rm -rf ~/.swiftpm/cache
-          swift package reset
+      # The build folder is kept between runs, keyed on the lock file and the Xcode
+      # version, so a run compiles only what changed. A new Xcode starts a new cache:
+      # modules built by another compiler do not load.
+      - name: Cache build folder
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-xcode-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            spm-${{ runner.os }}-xcode-${{ steps.xcode.outputs.version }}-
 
       - name: Resolve dependencies
         run: |

@@ -73,9 +73,9 @@ uninstall:
 	@echo "For those, run 'mac-runner uninstall' first - it deregisters from GitHub and"
 	@echo "removes service-user workspaces, preserving anything it does not recognise."
 
-# Run tests
+# Run tests. FILTER narrows the run: make test FILTER=AppSettingsTests
 test:
-	swift test
+	swift test $(if $(FILTER),--filter '$(FILTER)')
 
 # Format code
 format:
